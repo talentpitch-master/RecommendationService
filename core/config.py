@@ -24,6 +24,7 @@ class Config:
         if hasattr(self, '_initialized'):
             return
         self._initialized = True
+        print(os.getenv('MYSQL_HOST'))
 
         self.PROJECT_ROOT = Path(__file__).resolve().parent.parent
         self.DATA_DIR = self.PROJECT_ROOT / 'data'
@@ -33,27 +34,16 @@ class Config:
         self.MYSQL_PORT = int(os.getenv('MYSQL_PORT', 3306))
         self.MYSQL_USER = os.getenv('MYSQL_USER', 'root')
         self.MYSQL_PASSWORD = os.getenv('MYSQL_PASSWORD', '')
-        self.MYSQL_DATABASE = os.getenv('MYSQL_DATABASE', 'talent')
-
-        self.MYSQL_SSH_TUNNEL = os.getenv('MYSQL_SSH_TUNNEL', 'false').lower() == 'true'
-        self.MYSQL_SSH_HOST = os.getenv('MYSQL_SSH_HOST', '')
-        self.MYSQL_SSH_PORT = int(os.getenv('MYSQL_SSH_PORT', 22))
-        self.MYSQL_SSH_USER = os.getenv('MYSQL_SSH_USER', '')
-        self.MYSQL_SSH_KEY_PATH = os.getenv('MYSQL_SSH_KEY_PATH', '')
+        self.MYSQL_DATABASE = os.getenv('MYSQL_DB', 'talent')
 
         self.REDIS_HOST = os.getenv('REDIS_HOST', 'localhost')
         self.REDIS_PORT = int(os.getenv('REDIS_PORT', 6379))
-        self.REDIS_DB = int(os.getenv('REDIS_DB', 0))
+        self.REDIS_DB = int(os.getenv('REDIS_DB', 1))
         self.REDIS_PASSWORD = os.getenv('REDIS_PASSWORD', None)
-
-        self.REDIS_SSH_TUNNEL = os.getenv('REDIS_SSH_TUNNEL', 'false').lower() == 'true'
-        self.REDIS_SSH_HOST = os.getenv('REDIS_SSH_HOST', '')
-        self.REDIS_SSH_PORT = int(os.getenv('REDIS_SSH_PORT', 22))
-        self.REDIS_SSH_USER = os.getenv('REDIS_SSH_USER', '')
-        self.REDIS_SSH_KEY_PATH = os.getenv('REDIS_SSH_KEY_PATH', '')
+        self.REDIS_SCHEME = os.getenv('REDIS_SCHEME', 'redis')
 
         self.API_HOST = os.getenv('API_HOST', '0.0.0.0')
-        self.API_PORT = int(os.getenv('API_PORT', 5002))
+        self.API_PORT = int(os.getenv('API_PORT', 5005))
         self.DEBUG = os.getenv('FLASK_ENV', 'production') == 'development'
 
         self.FLUSH_INTERVAL_SECONDS = int(os.getenv('FLUSH_INTERVAL_SECONDS', 900))
