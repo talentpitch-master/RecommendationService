@@ -27,16 +27,37 @@ jobs:
 
       - name: Check and create ECR repository
         id: ecr-repo
-        uses: ./.github/actions/check-ecr-repository
-        with:
-          repository_name: ${{ steps.string.outputs.lowercase }}
-          region: ${{ env.REGION }}
-          repository_type: 'private'
+        run: |
+          REPO_NAME="${{ steps.string.outputs.lowercase }}"
+          REGION="${{ env.REGION }}"
+          
+          echo "🔍 Checking ECR repository: $REPO_NAME in region: $REGION"
+          
+          # Verificar si el repositorio existe
+          if aws ecr describe-repositories --repository-names $REPO_NAME --region $REGION 2>/dev/null; then
+            echo "✅ Repository already exists: $REPO_NAME"
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "created=false" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️  Repository does not exist, creating: $REPO_NAME"
+            aws ecr create-repository \
+              --repository-name $REPO_NAME \
+              --region $REGION \
+              --image-scanning-configuration scanOnPush=true \
+              --encryption-configuration encryptionType=AES256 \
+              --image-tag-mutability MUTABLE
+            
+            echo "✅ Repository created successfully: $REPO_NAME"
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "created=true" >> $GITHUB_OUTPUT
+          fi
+          
+          echo "repo_name=$REPO_NAME" >> $GITHUB_OUTPUT
 
       - name: ECR Repository status
         run: |
           echo "════════════════════════════════════════"
-          echo "📦 Repository Name: ${{ steps.ecr-repo.outputs.repository_name }}"
+          echo "📦 Repository Name: ${{ steps.ecr-repo.outputs.repo_name }}"
           echo "📍 Region: ${{ env.REGION }}"
           echo "✅ Already Existed: ${{ steps.ecr-repo.outputs.exists }}"
           echo "🆕 Created Now: ${{ steps.ecr-repo.outputs.created }}"
