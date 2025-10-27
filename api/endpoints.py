@@ -49,7 +49,7 @@ def async_flush_activity(user_id: int):
     except Exception as e:
         logger.error(f"Error flush async user {user_id}: {e}")
 
-@router.post("/api/search/total")
+@router.post("/search/total")
 async def total(request: Request, background_tasks: BackgroundTasks):
     """
     Endpoint para descubrir challenges/flows.
@@ -174,7 +174,7 @@ async def total(request: Request, background_tasks: BackgroundTasks):
         }
     }
 
-@router.post("/api/search/discover")
+@router.post("/search/discover")
 async def discover(request: Request, background_tasks: BackgroundTasks):
     """
     Endpoint para descubrir resumes/videos (talentos).
@@ -245,7 +245,7 @@ async def discover(request: Request, background_tasks: BackgroundTasks):
         }
     }
 
-@router.post("/api/search/flow")
+@router.post("/search/flow")
 async def flow(request: Request, background_tasks: BackgroundTasks):
     """
     Endpoint principal de feed mixto con patron VMP-AU-AU-VMP-NU-FW.
@@ -334,7 +334,7 @@ async def flow(request: Request, background_tasks: BackgroundTasks):
         }
     }
 
-@router.post("/api/search/reload")
+@router.post("/search/reload")
 async def reload_data():
     """
     Recarga todos los datos desde MySQL y reinicializa el motor de recomendacion.

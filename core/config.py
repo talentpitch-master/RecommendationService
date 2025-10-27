@@ -2,7 +2,12 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Cargar variables de entorno desde .env en la raiz del proyecto
+env_path = Path(__file__).resolve().parent.parent / '.env'
+load_dotenv(dotenv_path=env_path)
+
+if not env_path.exists():
+    print(f"ADVERTENCIA: No se encontro .env en: {env_path}")
 
 class Config:
     """
@@ -44,7 +49,16 @@ class Config:
 
         self.API_HOST = os.getenv('API_HOST', '0.0.0.0')
         self.API_PORT = int(os.getenv('API_PORT', 5005))
+        self.API_PATH = os.getenv('API_PATH', '')
         self.DEBUG = os.getenv('FLASK_ENV', 'production') == 'development'
+        
+        # Debug: mostrar configuracion de API_PATH
+        if self.API_PATH:
+            print(f"✓ API_PATH configurado: '{self.API_PATH}'")
+            print(f"  Rutas disponibles en: http://{self.API_HOST}:{self.API_PORT}{self.API_PATH}/search/...")
+        else:
+            print("✓ API_PATH no configurado (usando prefijo /api por defecto)")
+            print(f"  Rutas disponibles en: http://{self.API_HOST}:{self.API_PORT}/api/search/...")
 
         self.FLUSH_INTERVAL_SECONDS = int(os.getenv('FLUSH_INTERVAL_SECONDS', 900))
         self.FLUSH_THRESHOLD_ACTIVITIES = int(os.getenv('FLUSH_THRESHOLD_ACTIVITIES', 50))

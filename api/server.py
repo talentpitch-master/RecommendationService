@@ -53,7 +53,19 @@ app.add_middleware(
 )
 
 from api.endpoints import router
-app.include_router(router)
+from core.config import Config
+
+config = Config()
+
+# Incluir router con el prefijo configurado
+# Si hay API_PATH (produccion): usa el prefijo directo
+# Si no hay API_PATH (desarrollo local): agrega /api/ para mantener compatibilidad
+if config.API_PATH:
+    logger.info(f"Incluyendo router con prefijo: {config.API_PATH}")
+    app.include_router(router, prefix=config.API_PATH)
+else:
+    logger.info("Incluyendo router con prefijo por defecto: /api")
+    app.include_router(router, prefix="/api")
 
 @app.get("/")
 async def root():
@@ -61,3 +73,20 @@ async def root():
     Endpoint raiz que retorna informacion basica del API.
     """
     return {"message": "TalentPitch Search API", "status": "ok", "version": "2.0"}
+
+# Endpoint health check sin prefijo para Kubernetes
+@app.get("/health")
+async def health():
+    """
+    Health check endpoint sin prefijo para Kubernetes liveness probe.
+    """
+    return {"status": "healthy", "version": "2.0"}
+
+# Si hay API_PATH, agregar endpoint raiz con el prefijo DESPUES de definir las rutas
+if config.API_PATH:
+    @app.get(config.API_PATH)
+    async def root_with_prefix():
+        """
+        Endpoint raiz con prefijo - acepta GET para compatibilidad con navegadores.
+        """
+        return {"message": "TalentPitch Search API", "status": "ok", "version": "2.0", "path": config.API_PATH}

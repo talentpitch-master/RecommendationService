@@ -29,15 +29,16 @@ class RedisConnection:
 
     def _load_credentials(self):
         """
-        Carga credenciales desde archivo .env en carpeta credentials.
+        Carga credenciales desde archivo .env en la raiz del proyecto.
         Configura variables para Redis.
         """
         current_file = Path(__file__).resolve()
         project_root = current_file.parent.parent
-        env_path = project_root / 'credentials' / '.env'
-
+        
+        env_path = project_root / '.env'
+        
         if not env_path.exists():
-            raise FileNotFoundError(f"No se encontro .env en: {env_path}")
+            raise FileNotFoundError(f"No se encontro .env en la raiz del proyecto: {env_path}")
 
         load_dotenv(env_path)
 
