@@ -460,13 +460,11 @@ redis_client = redis.Redis(
 env_path = project_root / 'credentials' / '.env'
 load_dotenv(env_path)
 
-# Select environment
-ENVIRONMENT = os.getenv('ENVIRONMENT', 'staging')
-prefix = 'PROD' if ENVIRONMENT == 'prod' else 'STG'
-
-# Use prefixed variables
-mysql_host = os.getenv(f'{prefix}_MYSQL_HOST')
-mysql_user = os.getenv(f'{prefix}_MYSQL_USER')
+# Use simple variable names
+mysql_host = os.getenv('MYSQL_HOST')
+mysql_user = os.getenv('MYSQL_USER')
+mysql_password = os.getenv('MYSQL_PASSWORD')
+mysql_db = os.getenv('MYSQL_DB')
 # ... etc
 ```
 
