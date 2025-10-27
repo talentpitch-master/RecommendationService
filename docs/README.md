@@ -30,6 +30,13 @@ Esta carpeta contiene la documentación técnica completa del servicio de recome
    - Deployment
    - Contributing
 
+4. **[Análisis de Escalabilidad](scalability-analysis.md)** 📊
+   - Escalabilidad con HPA en EKS
+   - Arquitectura y limitaciones
+   - Capacidad de producción
+   - Configuración recomendada
+   - Aprendizaje de bandits
+
 ### Navegación Rápida
 
 | Necesitas | Lee esto |
@@ -37,6 +44,7 @@ Esta carpeta contiene la documentación técnica completa del servicio de recome
 | Entender qué es el proyecto | [Resumen del Proyecto](project-summary.md) |
 | Conocer la arquitectura | [Arquitectura](architecture.md) |
 | Empezar a desarrollar | [Guía de Desarrollo](development-guide.md) |
+| Escalabilidad y HPA | [Análisis de Escalabilidad](scalability-analysis.md) |
 | Usar la API | [Resumen del Proyecto - API Endpoints](project-summary.md#-api-endpoints) |
 | Debugging | [Guía de Desarrollo - Debugging](development-guide.md#-debugging) |
 | Deploy | [Guía de Desarrollo - Deployment](development-guide.md#-deployment) |
@@ -61,8 +69,9 @@ Esta documentación proporciona:
 
 1. Leer [Resumen del Proyecto](project-summary.md) para entender el sistema
 2. Revisar [Arquitectura](architecture.md) para entender el diseño
-3. Seguir [Guía de Desarrollo](development-guide.md) para setup local
-4. Consultar específicos según necesidad
+3. Revisar [Análisis de Escalabilidad](scalability-analysis.md) para capacidades
+4. Seguir [Guía de Desarrollo](development-guide.md) para setup local
+5. Consultar específicos según necesidad
 
 ### Para Deployment
 
