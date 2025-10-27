@@ -37,7 +37,12 @@ async def lifespan(app: FastAPI):
         _flush_task.cancel()
     logger.info("FastAPI detenido")
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="TalentPitch Search API",
+    description="Servicio de recomendaciones con bandits contextuales",
+    version="2.0",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
