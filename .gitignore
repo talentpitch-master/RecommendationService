@@ -1,0 +1,6 @@
+**/__pycache__
+/credentials/.env
+/credentials/*.pem
+/logs
+cleanup.py
+.claude
