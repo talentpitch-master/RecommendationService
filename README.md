@@ -78,6 +78,13 @@ FLUSH_THRESHOLD_ACTIVITIES=
 
 Para cambiar entre staging y production, simplemente edita el archivo `credentials/.env` con las credenciales correspondientes. No necesitas modificar múltiples variables con prefijos.
 
+## Ejecutar localmente
+
+```bash
+# Ejecutar localmente
+uvicorn main:app --reload --host 0.0.0.0 --port 5005
+```
+
 ## Construcción y Despliegue
 
 ### Build Local
