@@ -1,4 +1,4 @@
-name: Check and Create ECR Repository
+name: Create ECR Repository
 
 on:
   workflow_dispatch:
@@ -9,7 +9,7 @@ env:
   REGION: ${{ secrets.REGION }}
 
 jobs:
-  check_and_create_ecr:
+  create-ecr-repository:
     name: Check and Create ECR Repository
     runs-on: ubuntu-latest
     steps:

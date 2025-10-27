@@ -1,0 +1,115 @@
+name: Deploy to EKS Develop
+
+on:
+  push:
+    branches:
+      - develop
+  workflow_dispatch:
+
+env:
+  ENV: development
+  EKS_CLUSTER: eks-development
+  SERVICE_NAME: recommendationservice
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  REGION: ${{ secrets.REGION }}
+  ECR_NAME: ${{ secrets.ECR_REPOSITORY }}
+
+jobs:
+  build:
+    name: Build Image
+    runs-on: ubuntu-latest
+    outputs:
+      image-uri: ${{ steps.build.outputs.image-uri }}
+      image-tag: ${{ steps.build.outputs.image-tag }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - id: string
+        uses: ASzc/change-string-case-action@v6
+        with:
+          string: ${{ github.event.repository.name }}
+
+      - name: Build, tag, and push image to Amazon ECR
+        id: build
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ${{ steps.string.outputs.lowercase }}
+          RAW_IMAGE_TAG: ${{ github.head_ref || github.ref_name }}
+          IMAGE_TAG_SHA: "${{ github.sha }}-${{ env.ENV }}"
+        run: |
+          # Sanitize image tag
+          IMAGE_TAG=$(echo "$RAW_IMAGE_TAG" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9._-]/-/g' | sed 's/^[.-]//' | cut -c1-128)
+          echo "Original image tag: $RAW_IMAGE_TAG"
+          echo "Sanitized image tag: $IMAGE_TAG" 
+          echo "Image tag with SHA: $IMAGE_TAG_SHA"
+          echo "Full image URI: $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_SHA"
+
+          # Download environment file
+          mkdir -p credentials
+          aws s3 cp s3://ipedia-secrets/$RAW_IMAGE_TAG/$ECR_REPOSITORY/.env credentials/.env || echo "No .env file found in S3"
+
+          # Build and push images
+          docker build --platform linux/amd64 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
+          docker tag $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_SHA
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_SHA
+          # Set outputs for deploy job
+          echo "image-uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_SHA" >> $GITHUB_OUTPUT
+          echo "image-tag=$IMAGE_TAG_SHA" >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: build
+    name: deploy Service
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop' || (github.event_name == 'pull_request' && github.base_ref == 'develop' && github.event.action == 'closed' && github.event.pull_request.merged == true)
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.REGION }}
+      - uses: actions/checkout@v4
+      
+      # CRITICAL: Debug step to verify job outputs
+      - name: Debug deployment image
+        run: |
+          echo "ECR_NAME: ${{ env.ECR_NAME }}"
+          echo "SERVICE_NAME: ${{ env.SERVICE_NAME }}"
+          echo "SHA: ${{ github.sha }}"
+          echo "ENV: ${{ env.ENV }}"
+          echo "Full image: ${{ env.ECR_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}-${{ env.ENV }}"
+      
+      - name: Update deployment image
+        uses: nikosch86/github-action-eks-kubectl@main
+        with:
+          command: set image deployment/${{ env.SERVICE_NAME }} ${{ env.SERVICE_NAME }}=${{ env.ECR_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}-${{ env.ENV }} -n ${{ env.ENV }}
+        env:
+          EKS_CLUSTER: ${{ env.EKS_CLUSTER }}
+      
+      - name: Wait for rollout to complete
+        uses: nikosch86/github-action-eks-kubectl@main
+        with:
+          command: rollout status deployment/${{ env.SERVICE_NAME }} -n ${{ env.ENV }} --timeout=300s
+        env:
+          EKS_CLUSTER: ${{ env.EKS_CLUSTER }}
+      
+      - name: Verify deployment
+        uses: nikosch86/github-action-eks-kubectl@main
+        with:
+          command: get pods -n ${{ env.ENV }} -l app=${{ env.SERVICE_NAME }}
+        env:
+          EKS_CLUSTER: ${{ env.EKS_CLUSTER }}
