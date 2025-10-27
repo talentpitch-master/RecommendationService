@@ -39,7 +39,6 @@ docker run -d --name source \
   -v $(pwd)/credentials:/app/credentials:ro \
   -v $(pwd)/data:/app/data:ro \
   -v $(pwd)/logs:/app/logs \
-  -e ENVIRONMENT=staging \
   talentpitch-search:latest
 
 # Ver logs

@@ -292,9 +292,7 @@ SSHTunnelForwarder(
 ### Credenciales
 
 - `.env` en carpeta `credentials/` (NO versionado)
-- Llaves SSH `.pem` en carpeta `credentials/` (NO versionado)
-- Soporte multi-ambiente: `STG_*` para staging, `PROD_*` para producción
-- Selección mediante variable `ENVIRONMENT`
+- Variables simples sin prefijos (ej: `MYSQL_HOST` en lugar de `STG_MYSQL_HOST`)
 
 ---
 
@@ -322,7 +320,6 @@ docker run -d --name source \
   -v $(pwd)/credentials:/app/credentials:ro \
   -v $(pwd)/data:/app/data:ro \
   -v $(pwd)/logs:/app/logs \
-  -e ENVIRONMENT=production \
   talentpitch-search:latest
 ```
 
@@ -505,32 +502,22 @@ curl -X POST http://localhost:5002/api/search/reload
 Archivo: `credentials/.env`
 
 ```ini
-# Ambiente
-ENVIRONMENT=staging  # o prod
-
 # SSH Tunnel
 SSH_HOST=<host>
 SSH_USER=<user>
+
+# MySQL
+MYSQL_HOST=<host>
+MYSQL_PORT=3306
+MYSQL_USER=<user>
+MYSQL_PASSWORD=<pass>
+MYSQL_DB=<db>
 
 # Redis
 REDIS_HOST=<host>
 REDIS_PASSWORD=<pass>
 REDIS_PORT=<port>
 REDIS_SCHEME=tls  # o redis
-
-# MySQL Staging
-STG_MYSQL_HOST=<host>
-STG_MYSQL_PORT=3306
-STG_MYSQL_USER=<user>
-STG_MYSQL_PASSWORD=<pass>
-STG_MYSQL_DB=<db>
-
-# MySQL Production
-PROD_MYSQL_HOST=<host>
-PROD_MYSQL_PORT=3306
-PROD_MYSQL_USER=<user>
-PROD_MYSQL_PASSWORD=<pass>
-PROD_MYSQL_DB=<db>
 
 # API
 API_HOST=0.0.0.0
@@ -543,10 +530,7 @@ FLUSH_THRESHOLD_ACTIVITIES=50
 
 ### Cambio de Ambiente
 
-1. Modificar `ENVIRONMENT` en `.env`
-2. Verificar credenciales correspondientes (STG_* o PROD_*)
-3. Reconstruir imagen Docker
-4. Reiniciar contenedor
+Para cambiar entre staging y production, simplemente edita el archivo `credentials/.env` con las credenciales correspondientes. No necesitas modificar múltiples variables con prefijos.
 
 ---
 
@@ -596,7 +580,6 @@ docker run -d --name source \
   -v $(pwd)/credentials:/app/credentials:ro \
   -v $(pwd)/data:/app/data:ro \
   -v $(pwd)/logs:/app/logs \
-  -e ENVIRONMENT=production \
   talentpitch-search:prod
 ```
 
