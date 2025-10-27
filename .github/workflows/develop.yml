@@ -59,7 +59,7 @@ jobs:
 
           # Download environment file
           mkdir -p credentials
-          aws s3 cp s3://ipedia-secrets/$RAW_IMAGE_TAG/$ECR_REPOSITORY/env .env || echo "No .env file found in S3"
+          aws s3 cp s3://ipedia-secrets/$RAW_IMAGE_TAG/$ECR_REPOSITORY/.env credentials/.env || echo "No .env file found in S3"
 
           # Build and push images
           docker build --platform linux/amd64 -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
