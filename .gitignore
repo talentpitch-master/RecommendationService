@@ -5,3 +5,5 @@
 cleanup.py
 .claude
 venv/
+env
+.env
