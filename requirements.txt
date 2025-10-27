@@ -2,8 +2,6 @@ gunicorn==23.0.0
 uvicorn==0.38.0
 fastapi==0.119.1
 redis==7.0.0
-paramiko==3.4.1
-sshtunnel==0.4.0
 python-dotenv==1.1.1
 pymysql==1.1.2
 pandas==2.3.3
