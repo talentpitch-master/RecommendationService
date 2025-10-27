@@ -4,3 +4,4 @@
 /logs
 cleanup.py
 .claude
+venv/
