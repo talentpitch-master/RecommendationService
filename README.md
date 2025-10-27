@@ -8,8 +8,8 @@ Servicio de recomendaciones y búsqueda de contenido basado en motor de bandits 
 
 - Python 3.13 Alpine
 - FastAPI + Gunicorn + Uvicorn
-- MySQL (conexión vía SSH tunnel)
-- Redis (conexión vía SSH tunnel con SSL)
+- MySQL (conexión directa)
+- Redis (conexión directa con SSL)
 - Docker
 
 ### Componentes Principales
@@ -18,6 +18,7 @@ Servicio de recomendaciones y búsqueda de contenido basado en motor de bandits 
 - **Data Service**: Carga y gestión de datos en memoria
 - **Activity Tracker**: Registro de actividades de usuario en Redis con flush automático a MySQL
 - **API REST**: Endpoints para descubrimiento de contenido y gestión de datos
+- **Conexiones directas**: Sin tuneles SSH, conexión directa a MySQL y Redis
 
 ## Estructura del Proyecto
 
@@ -44,41 +45,25 @@ search/
 └── main.py
 ```
 
-## Configuración de Ambientes
-
-El servicio soporta dos ambientes: staging y production. La selección se realiza mediante la variable `ENVIRONMENT` en el archivo `.env`.
+## Configuración
 
 ### Variables de Entorno
 
 Archivo: `credentials/.env`
 
 ```ini
-[ENVIRONMENT]
-ENVIRONMENT=staging     # Opciones: staging o prod
-
-[SSH_TUNNEL]
-SSH_HOST=
-SSH_USER=
+[MYSQL]
+MYSQL_HOST=
+MYSQL_PORT=
+MYSQL_USER=
+MYSQL_PASSWORD=
+MYSQL_DB=
 
 [REDIS]
 REDIS_HOST=
 REDIS_PASSWORD=
 REDIS_PORT=
 REDIS_SCHEME=
-
-[MYSQL_STAGING]
-STG_MYSQL_HOST=
-STG_MYSQL_PORT=
-STG_MYSQL_USER=
-STG_MYSQL_PASSWORD=
-STG_MYSQL_DB=
-
-[MYSQL_PRODUCTION]
-PROD_MYSQL_HOST=
-PROD_MYSQL_PORT=
-PROD_MYSQL_USER=
-PROD_MYSQL_PASSWORD=
-PROD_MYSQL_DB=
 
 [API_CONFIG]
 API_HOST=
@@ -89,25 +74,9 @@ FLUSH_INTERVAL_SECONDS=
 FLUSH_THRESHOLD_ACTIVITIES=
 ```
 
-**Ejemplo para Staging:**
-```ini
-ENVIRONMENT=staging
-```
-
-**Ejemplo para Production:**
-```ini
-ENVIRONMENT=prod
-```
-
 ### Cambio de Ambiente
 
-Para cambiar entre staging y production:
-
-1. Modificar `ENVIRONMENT=staging` o `ENVIRONMENT=prod` en `credentials/.env`
-2. Asegurar que las credenciales correspondientes (STG_* o PROD_*) estén configuradas
-3. Reconstruir la imagen Docker
-
-El sistema selecciona automáticamente las credenciales correctas según el prefijo (STG_ o PROD_) basándose en el valor de `ENVIRONMENT`.
+Para cambiar entre staging y production, simplemente edita el archivo `credentials/.env` con las credenciales correspondientes. No necesitas modificar múltiples variables con prefijos.
 
 ## Construcción y Despliegue
 
@@ -130,7 +99,6 @@ docker run -d --name search-service \
   -v $(pwd)/credentials:/app/credentials:ro \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/logs:/app/logs \
-  -e ENVIRONMENT=staging \
   talentpitch-search:latest
 ```
 
@@ -145,7 +113,6 @@ docker run -d --name source \
   -v $(pwd)/credentials:/app/credentials:ro \
   -v $(pwd)/data:/app/data \
   -v $(pwd)/logs:/app/logs \
-  -e ENVIRONMENT=production \
   talentpitch-search:latest
 ```
 
@@ -153,9 +120,6 @@ docker run -d --name source \
 - `credentials/`: Credenciales de acceso (read-only) - incluye .env y archivos .pem
 - `data/`: Datos persistentes de la aplicación
 - `logs/`: Logs de la aplicación
-
-**Variables de entorno:**
-- `ENVIRONMENT`: staging o production (define qué credenciales usar)
 
 ### Verificación de Estado
 
@@ -539,7 +503,7 @@ Niveles de log importantes:
 
 ### Error: Variables de entorno faltantes
 
-Verificar que todas las variables requeridas estén en `credentials/.env` y que el prefijo (STG_ o PROD_) coincida con el valor de `ENVIRONMENT`.
+Verificar que todas las variables requeridas estén en `credentials/.env`.
 
 ### Error: No se puede conectar a MySQL/Redis
 
