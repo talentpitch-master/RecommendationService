@@ -1,7 +1,6 @@
 import os
 import pymysql
 from pathlib import Path
-from sshtunnel import SSHTunnelForwarder
 from dotenv import load_dotenv
 from utils.logger import LoggerConfig
 
@@ -9,7 +8,7 @@ logger = LoggerConfig.get_logger(__name__)
 
 class MySQLConnection:
     """
-    Conexion singleton a MySQL con tunel SSH.
+    Conexion singleton a MySQL.
     Utiliza patron singleton para mantener una sola instancia de la conexion.
     """
     _instance = None
@@ -25,14 +24,12 @@ class MySQLConnection:
             return
 
         MySQLConnection._initialized = True
-        self.tunnel = None
         self.connection = None
         self._load_credentials()
 
     def _load_credentials(self):
         """
         Carga credenciales desde archivo .env en carpeta credentials.
-        Configura path de clave SSH para el tunel.
         """
         current_file = Path(__file__).resolve()
         project_root = current_file.parent.parent
@@ -44,60 +41,33 @@ class MySQLConnection:
         load_dotenv(env_path)
         logger.info(f"Credenciales cargadas desde: {env_path}")
 
-        self.ssh_key_path = project_root / 'credentials' / 'talethpitch-develop-bastion.pem'
-        if not self.ssh_key_path.exists():
-            raise FileNotFoundError(f"No se encontro clave SSH en: {self.ssh_key_path}")
-
     def connect(self):
         """
-        Establece tunel SSH y conexion a MySQL.
+        Establece conexion directa a MySQL.
         Valida variables requeridas y configura cursores tipo DictCursor.
         """
-        environment = os.getenv('ENVIRONMENT', 'staging').lower()
-        prefix = 'PROD' if environment == 'prod' else 'STG'
-
-        ssh_host = os.getenv('SSH_HOST')
-        ssh_user = os.getenv('SSH_USER')
-        mysql_host = os.getenv(f'{prefix}_MYSQL_HOST')
-        mysql_user = os.getenv(f'{prefix}_MYSQL_USER')
-        mysql_password = os.getenv(f'{prefix}_MYSQL_PASSWORD')
-        mysql_db = os.getenv(f'{prefix}_MYSQL_DB')
-        mysql_port = int(os.getenv(f'{prefix}_MYSQL_PORT', '3306'))
+        mysql_host = os.getenv('MYSQL_HOST')
+        mysql_port = int(os.getenv('MYSQL_PORT', '3306'))
+        mysql_user = os.getenv('MYSQL_USER')
+        mysql_password = os.getenv('MYSQL_PASSWORD')
+        mysql_db = os.getenv('MYSQL_DB')
 
         required_vars = {
-            'SSH_HOST': ssh_host,
-            'SSH_USER': ssh_user,
-            f'{prefix}_MYSQL_HOST': mysql_host,
-            f'{prefix}_MYSQL_USER': mysql_user,
-            f'{prefix}_MYSQL_DB': mysql_db
+            'MYSQL_HOST': mysql_host,
+            'MYSQL_USER': mysql_user,
+            'MYSQL_DB': mysql_db
         }
 
         missing = [k for k, v in required_vars.items() if not v]
         if missing:
             raise ValueError(f"Variables de entorno faltantes: {', '.join(missing)}")
 
-        logger.info(f"Iniciando tunel SSH hacia {ssh_user}@{ssh_host}")
-
-        try:
-            self.tunnel = SSHTunnelForwarder(
-                (ssh_host, 22),
-                ssh_username=ssh_user,
-                ssh_pkey=str(self.ssh_key_path),
-                remote_bind_address=(mysql_host, mysql_port),
-                local_bind_address=('127.0.0.1', 0)
-            )
-            self.tunnel.start()
-            logger.info(f"Tunel SSH establecido en puerto local {self.tunnel.local_bind_port}")
-        except Exception as e:
-            logger.error(f"Error estableciendo tunel SSH: {e}")
-            raise
-
-        logger.info(f"Conectando a MySQL - DB: {mysql_db}")
+        logger.info(f"Conectando a MySQL - Host: {mysql_host}:{mysql_port}, DB: {mysql_db}")
 
         try:
             self.connection = pymysql.connect(
-                host="127.0.0.1",
-                port=self.tunnel.local_bind_port,
+                host=mysql_host,
+                port=mysql_port,
                 user=mysql_user,
                 password=mysql_password,
                 db=mysql_db,
@@ -110,8 +80,6 @@ class MySQLConnection:
             return self.connection
         except Exception as e:
             logger.error(f"Error conectando a MySQL: {e}")
-            if self.tunnel:
-                self.tunnel.stop()
             raise
 
     def execute_query(self, query, params=None):
@@ -144,7 +112,7 @@ class MySQLConnection:
 
     def close(self):
         """
-        Cierra la conexion a MySQL y el tunel SSH.
+        Cierra la conexion a MySQL.
         """
         if self.connection:
             try:
@@ -154,15 +122,6 @@ class MySQLConnection:
                 logger.error(f"Error cerrando conexion MySQL: {e}")
             finally:
                 self.connection = None
-
-        if self.tunnel:
-            try:
-                self.tunnel.stop()
-                logger.info("Tunel SSH cerrado")
-            except Exception as e:
-                logger.error(f"Error cerrando tunel SSH: {e}")
-            finally:
-                self.tunnel = None
 
     def __enter__(self):
         self.connect()
