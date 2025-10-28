@@ -176,7 +176,7 @@ class DataService:
         Aplica blacklist a nivel SQL y calcula scores normalizados.
         Incluye ratings, connections, likes, exhibited y views.
         """
-        lista_negra_sql = ','.join([f"'{url.replace('%', '%%')}'" for url in self.lista_negra]) if self.lista_negra else "''"
+        lista_negra_sql = ','.join([f"'{url}'" for url in self.lista_negra]) if self.lista_negra else "''"
 
         query = f"""
         SELECT /*+ MAX_EXECUTION_TIME(60000) */
@@ -307,7 +307,7 @@ class DataService:
         Filtra por status published, aplica blacklist y elimina duplicados por video URL.
         Solo incluye flows creados/actualizados desde 2025-01-01.
         """
-        lista_negra_sql = ','.join([f"'{url.replace('%', '%%')}'" for url in self.lista_negra]) if self.lista_negra else "''"
+        lista_negra_sql = ','.join([f"'{url}'" for url in self.lista_negra]) if self.lista_negra else "''"
 
         query = f"""
         SELECT
