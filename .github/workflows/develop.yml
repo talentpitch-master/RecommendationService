@@ -20,7 +20,6 @@ jobs:
     name: Build Image
     runs-on: ubuntu-latest
     outputs:
-      image-uri: ${{ steps.build.outputs.image-uri }}
       image-tag: ${{ steps.build.outputs.image-tag }}
     steps:
       - name: Check out code
@@ -67,7 +66,6 @@ jobs:
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
           docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_SHA
           # Set outputs for deploy job
-          echo "image-uri=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG_SHA" >> $GITHUB_OUTPUT
           echo "image-tag=$IMAGE_TAG_SHA" >> $GITHUB_OUTPUT
 
   deploy:
@@ -92,24 +90,27 @@ jobs:
           echo "SHA: ${{ github.sha }}"
           echo "ENV: ${{ env.ENV }}"
           echo "Full image: ${{ env.ECR_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}-${{ env.ENV }}"
-      
-      - name: Update deployment image
-        uses: nikosch86/github-action-eks-kubectl@main
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
         with:
-          command: set image deployment/${{ env.SERVICE_NAME }} ${{ env.SERVICE_NAME }}=${{ env.ECR_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}-${{ env.ENV }} -n ${{ env.ENV }}
-        env:
-          EKS_CLUSTER: ${{ env.EKS_CLUSTER }}
-      
-      - name: Wait for rollout to complete
-        uses: nikosch86/github-action-eks-kubectl@main
-        with:
-          command: rollout status deployment/${{ env.SERVICE_NAME }} -n ${{ env.ENV }} --timeout=300s
-        env:
-          EKS_CLUSTER: ${{ env.EKS_CLUSTER }}
-      
-      - name: Verify deployment
-        uses: nikosch86/github-action-eks-kubectl@main
-        with:
-          command: get pods -n ${{ env.ENV }} -l app=${{ env.SERVICE_NAME }}
-        env:
-          EKS_CLUSTER: ${{ env.EKS_CLUSTER }}
+          version: 'v1.28.0'
+
+      - name: Configure kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER }} --region ${{ env.REGION }}
+
+      - name: Deploy to EKS
+        run: |
+          echo "Updating deployment image..."
+          kubectl set image deployment/${{ env.SERVICE_NAME }} \
+            ${{ env.SERVICE_NAME }}=${{ env.ECR_NAME }}/${{ env.SERVICE_NAME }}:${{ github.sha }}-${{ env.ENV }} \
+            -n ${{ env.ENV }}
+
+          echo "Waiting for rollout to complete..."
+          kubectl rollout status deployment/${{ env.SERVICE_NAME }} \
+            -n ${{ env.ENV }} \
+            --timeout=300s
+
+          echo "Verifying deployment..."
+          kubectl get pods -n ${{ env.ENV }} -l app=${{ env.SERVICE_NAME }}
