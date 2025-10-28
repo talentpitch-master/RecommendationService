@@ -30,7 +30,7 @@ PROD_MYSQL_PORT=3306
 - Dificulta el cambio de ambiente
 - Mayor posibilidad de errores
 
-### Ahora (✅ Buena práctica)
+### Ahora (✅ Buena)
 
 ```ini
 MYSQL_HOST=mysql-host.example.com
