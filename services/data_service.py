@@ -28,11 +28,11 @@ class DataService:
             raise ValueError("connection_factory requerido en primera inicializacion")
 
         self.connection_factory = connection_factory
-        self.users_df = None
-        self.videos_df = None
-        self.interactions_df = None
-        self.connections_df = None
-        self.flows_df = None
+        self.users_df = pd.DataFrame()
+        self.videos_df = pd.DataFrame()
+        self.interactions_df = pd.DataFrame()
+        self.connections_df = pd.DataFrame()
+        self.flows_df = pd.DataFrame()
         self._conn = None
         self.lista_negra = self._cargar_lista_negra()
         DataService._inicializado = True
@@ -155,9 +155,12 @@ class DataService:
 
         if not results:
             logger.warning("No se encontraron usuarios en BD")
-            return pd.DataFrame(columns=['id', 'name', 'email', 'city', 'country', 'skills',
-                                        'knowledges', 'tools', 'languages', 'seniority',
-                                        'model_type', 'opencall_objective'])
+            df_empty = pd.DataFrame(columns=['id', 'name', 'email', 'city', 'country', 'skills',
+                                            'knowledges', 'tools', 'languages', 'seniority',
+                                            'model_type', 'opencall_objective'])
+            df_empty['city'] = df_empty['city'].astype('category')
+            df_empty['country'] = df_empty['country'].astype('category')
+            return df_empty
 
         df = pd.DataFrame(results)
 
@@ -257,12 +260,15 @@ class DataService:
 
         if not results:
             logger.warning("No se encontraron videos/resumes en BD")
-            return pd.DataFrame(columns=['id', 'user_id', 'video', 'skills', 'knowledges',
-                                        'tools', 'video_languages', 'role_objectives', 'created_at',
-                                        'description', 'creator_city', 'creator_country', 'creator_name',
-                                        'avg_rating', 'rating_count', 'has_rating', 'connection_count',
-                                        'like_count', 'exhibited_count', 'actual_views', 'views',
-                                        'city', 'days_since_creation'])
+            df_empty = pd.DataFrame(columns=['id', 'user_id', 'video', 'skills', 'knowledges',
+                                            'tools', 'video_languages', 'role_objectives', 'created_at',
+                                            'description', 'creator_city', 'creator_country', 'creator_name',
+                                            'avg_rating', 'rating_count', 'has_rating', 'connection_count',
+                                            'like_count', 'exhibited_count', 'actual_views', 'views',
+                                            'city', 'days_since_creation'])
+            df_empty['city'] = df_empty['city'].astype('category')
+            df_empty['creator_name'] = df_empty['creator_name'].astype('category')
+            return df_empty
 
         df = pd.DataFrame(results)
 
@@ -341,9 +347,12 @@ class DataService:
 
         if not results:
             logger.warning("No se encontraron FLOWS en BD")
-            return pd.DataFrame(columns=['id', 'user_id', 'video', 'name', 'description',
-                                        'created_at', 'creator_name', 'creator_city',
-                                        'creator_country', 'city', 'days_since_creation'])
+            df_empty = pd.DataFrame(columns=['id', 'user_id', 'video', 'name', 'description',
+                                            'created_at', 'creator_name', 'creator_city',
+                                            'creator_country', 'city', 'days_since_creation'])
+            df_empty['city'] = df_empty['city'].astype('category')
+            df_empty['creator_name'] = df_empty['creator_name'].astype('category')
+            return df_empty
 
         df = pd.DataFrame(results)
         logger.info(f"FLOWS obtenidos de BD: {len(df)}")
