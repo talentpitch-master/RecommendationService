@@ -130,6 +130,7 @@ class DataService:
         """
         Carga usuarios desde tabla users con datos de perfiles.
         Incluye skills, languages, tools, knowledge y objetivos.
+        Solo usuarios creados o actualizados desde 1 de septiembre de 2024.
         """
         query = """
         SELECT
@@ -148,9 +149,14 @@ class DataService:
         FROM users u
         LEFT JOIN profiles p ON u.id = p.user_id
         WHERE u.deleted_at IS NULL
+        AND (u.created_at >= '2024-09-01' OR u.updated_at >= '2024-09-01')
         """
         results = self._execute_query(query)
         df = pd.DataFrame(results)
+
+        df['city'] = df['city'].astype('category')
+        df['country'] = df['country'].astype('category')
+
         logger.info(f"Usuarios cargados: {len(df)}")
         return df
 
@@ -228,6 +234,11 @@ class DataService:
         AND r.video IS NOT NULL
         AND r.video NOT IN ({lista_negra_sql})
         AND u.deleted_at IS NULL
+        AND r.created_at >= '2024-10-01'
+        AND LOWER(r.video) NOT LIKE '%prueba%'
+        AND LOWER(r.video) NOT LIKE '%test%'
+        AND LOWER(COALESCE(r.description, '')) NOT LIKE '%prueba%'
+        AND LOWER(COALESCE(r.description, '')) NOT LIKE '%test%'
         AND (
             r.views >= 5
             OR tf.avg_rating >= 3.0
@@ -238,18 +249,27 @@ class DataService:
         results = self._execute_query(query)
         df = pd.DataFrame(results)
 
-        df['views'] = pd.to_numeric(df['actual_views'], errors='coerce').fillna(0).astype(int)
+        numeric_int_cols = {
+            'views': 'actual_views',
+            'rating_count': 'rating_count',
+            'has_rating': 'has_rating',
+            'connection_count': 'connection_count',
+            'like_count': 'like_count',
+            'exhibited_count': 'exhibited_count'
+        }
+
+        for new_col, source_col in numeric_int_cols.items():
+            df[new_col] = pd.to_numeric(df[source_col], errors='coerce').fillna(0).astype(int)
+
         df['avg_rating'] = pd.to_numeric(df['avg_rating'], errors='coerce').fillna(0).astype(float)
-        df['rating_count'] = pd.to_numeric(df['rating_count'], errors='coerce').fillna(0).astype(int)
-        df['has_rating'] = pd.to_numeric(df['has_rating'], errors='coerce').fillna(0).astype(int)
-        df['connection_count'] = pd.to_numeric(df['connection_count'], errors='coerce').fillna(0).astype(int)
-        df['like_count'] = pd.to_numeric(df['like_count'], errors='coerce').fillna(0).astype(int)
-        df['exhibited_count'] = pd.to_numeric(df['exhibited_count'], errors='coerce').fillna(0).astype(int)
 
         df['city'] = df.apply(lambda row: self._normalize_city(row['creator_city'], row['creator_country']), axis=1)
 
         df['created_at'] = pd.to_datetime(df['created_at'])
         df['days_since_creation'] = (datetime.now() - df['created_at']).dt.days
+
+        df['city'] = df['city'].astype('category')
+        df['creator_name'] = df['creator_name'].astype('category')
 
         logger.info(f"Videos cargados: {len(df)}")
         logger.info(f"Videos con ciudad valida: {len(df[df['city'] != 'Unknown'])}")
@@ -317,6 +337,9 @@ class DataService:
             df['created_at'] = pd.to_datetime(df['created_at'])
             df['days_since_creation'] = (datetime.now() - df['created_at']).dt.days
 
+            df['city'] = df['city'].astype('category')
+            df['creator_name'] = df['creator_name'].astype('category')
+
         logger.info(f"FLOWS finales: {len(df)}")
 
         return df
@@ -325,6 +348,7 @@ class DataService:
         """
         Carga interacciones de usuarios con videos.
         Combina ratings, saves y matches en una matriz unificada.
+        Solo interacciones desde 1 de septiembre de 2024.
         Si no hay interacciones, crea matriz implicita desde views.
         """
         query = """
@@ -338,6 +362,7 @@ class DataService:
         WHERE type = 'ranking_resume'
         AND value > 0
         AND user_id IS NOT NULL
+        AND created_at >= '2024-09-01'
         UNION ALL
         SELECT
             user_id,
@@ -348,6 +373,7 @@ class DataService:
         FROM likes
         WHERE type = 'save'
         AND user_id IS NOT NULL
+        AND created_at >= '2024-09-01'
         UNION ALL
         SELECT
             user_id,
@@ -358,6 +384,7 @@ class DataService:
         FROM matches
         WHERE status = 'accepted'
         AND user_id IS NOT NULL
+        AND created_at >= '2024-09-01'
         """
         results = self._execute_query(query)
         df = pd.DataFrame(results)
@@ -405,6 +432,7 @@ class DataService:
         """
         Carga conexiones sociales entre usuarios.
         Solo incluye conexiones con status accepted para el grafo social.
+        Solo conexiones desde 1 de septiembre de 2024.
         """
         query = """
         SELECT
@@ -414,6 +442,7 @@ class DataService:
             created_at
         FROM user_connections
         WHERE status = 'accepted'
+        AND created_at >= '2024-09-01'
         """
         results = self._execute_query(query)
         df = pd.DataFrame(results)

@@ -27,4 +27,4 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5002
 
-CMD ["gunicorn", "api.server:app", "--bind", "0.0.0.0:5002", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "api.server:app", "--bind", "0.0.0.0:5002", "--workers", "2", "--preload", "--worker-class", "uvicorn.workers.UvicornWorker", "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-"]
