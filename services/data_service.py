@@ -152,6 +152,13 @@ class DataService:
         AND (u.created_at >= '2024-09-01' OR u.updated_at >= '2024-09-01')
         """
         results = self._execute_query(query)
+
+        if not results:
+            logger.warning("No se encontraron usuarios en BD")
+            return pd.DataFrame(columns=['id', 'name', 'email', 'city', 'country', 'skills',
+                                        'knowledges', 'tools', 'languages', 'seniority',
+                                        'model_type', 'opencall_objective'])
+
         df = pd.DataFrame(results)
 
         df['city'] = df['city'].astype('category')
@@ -247,6 +254,16 @@ class DataService:
         )
         """
         results = self._execute_query(query)
+
+        if not results:
+            logger.warning("No se encontraron videos/resumes en BD")
+            return pd.DataFrame(columns=['id', 'user_id', 'video', 'skills', 'knowledges',
+                                        'tools', 'video_languages', 'role_objectives', 'created_at',
+                                        'description', 'creator_city', 'creator_country', 'creator_name',
+                                        'avg_rating', 'rating_count', 'has_rating', 'connection_count',
+                                        'like_count', 'exhibited_count', 'actual_views', 'views',
+                                        'city', 'days_since_creation'])
+
         df = pd.DataFrame(results)
 
         numeric_int_cols = {
@@ -321,24 +338,29 @@ class DataService:
         """
 
         results = self._execute_query(query)
-        df = pd.DataFrame(results)
 
+        if not results:
+            logger.warning("No se encontraron FLOWS en BD")
+            return pd.DataFrame(columns=['id', 'user_id', 'video', 'name', 'description',
+                                        'created_at', 'creator_name', 'creator_city',
+                                        'creator_country', 'city', 'days_since_creation'])
+
+        df = pd.DataFrame(results)
         logger.info(f"FLOWS obtenidos de BD: {len(df)}")
 
-        if len(df) > 0:
-            antes = len(df)
-            df = df.drop_duplicates(subset=['video'], keep='first')
-            despues = len(df)
+        antes = len(df)
+        df = df.drop_duplicates(subset=['video'], keep='first')
+        despues = len(df)
 
-            if antes != despues:
-                logger.info(f"Duplicados eliminados: {antes - despues}")
+        if antes != despues:
+            logger.info(f"Duplicados eliminados: {antes - despues}")
 
-            df['city'] = df.apply(lambda row: self._normalize_city(row['creator_city'], row['creator_country']), axis=1)
-            df['created_at'] = pd.to_datetime(df['created_at'])
-            df['days_since_creation'] = (datetime.now() - df['created_at']).dt.days
+        df['city'] = df.apply(lambda row: self._normalize_city(row['creator_city'], row['creator_country']), axis=1)
+        df['created_at'] = pd.to_datetime(df['created_at'])
+        df['days_since_creation'] = (datetime.now() - df['created_at']).dt.days
 
-            df['city'] = df['city'].astype('category')
-            df['creator_name'] = df['creator_name'].astype('category')
+        df['city'] = df['city'].astype('category')
+        df['creator_name'] = df['creator_name'].astype('category')
 
         logger.info(f"FLOWS finales: {len(df)}")
 
