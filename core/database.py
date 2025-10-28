@@ -93,7 +93,10 @@ class MySQLConnection:
 
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute(query, params or ())
+                if params:
+                    cursor.execute(query, params)
+                else:
+                    cursor.execute(query)
 
                 query_type = query.strip().upper().split()[0]
 
