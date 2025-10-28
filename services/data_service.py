@@ -245,10 +245,10 @@ class DataService:
         AND r.video NOT IN ({lista_negra_sql})
         AND u.deleted_at IS NULL
         AND r.created_at >= '2024-10-01'
-        AND LOWER(r.video) NOT LIKE '%prueba%'
-        AND LOWER(r.video) NOT LIKE '%test%'
-        AND LOWER(COALESCE(r.description, '')) NOT LIKE '%prueba%'
-        AND LOWER(COALESCE(r.description, '')) NOT LIKE '%test%'
+        AND LOWER(r.video) NOT LIKE '%%prueba%%'
+        AND LOWER(r.video) NOT LIKE '%%test%%'
+        AND LOWER(COALESCE(r.description, '')) NOT LIKE '%%prueba%%'
+        AND LOWER(COALESCE(r.description, '')) NOT LIKE '%%test%%'
         AND (
             r.views >= 5
             OR tf.avg_rating >= 3.0
