@@ -260,12 +260,13 @@ class DataService:
 
         if not results:
             logger.warning("No se encontraron videos/resumes en BD")
-            df_empty = pd.DataFrame(columns=['id', 'user_id', 'video', 'skills', 'knowledges',
-                                            'tools', 'video_languages', 'role_objectives', 'created_at',
-                                            'description', 'creator_city', 'creator_country', 'creator_name',
-                                            'avg_rating', 'rating_count', 'has_rating', 'connection_count',
-                                            'like_count', 'exhibited_count', 'actual_views', 'views',
-                                            'city', 'days_since_creation'])
+            df_empty = pd.DataFrame(columns=['id', 'user_id', 'video', 'views', 'video_skills',
+                                            'video_knowledges', 'video_tools', 'video_languages',
+                                            'role_objectives', 'created_at', 'description',
+                                            'creator_city', 'creator_country', 'creator_name',
+                                            'avg_rating', 'rating_count', 'has_rating',
+                                            'connection_count', 'like_count', 'exhibited_count',
+                                            'actual_views', 'city', 'days_since_creation'])
             df_empty['city'] = df_empty['city'].astype('category')
             df_empty['creator_name'] = df_empty['creator_name'].astype('category')
             return df_empty
