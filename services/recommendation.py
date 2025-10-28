@@ -755,6 +755,7 @@ class RecommendationEngine:
 
         ids_excluir = prefs_usuario['vistos'].copy()
         if videos_excluidos:
+            videos_excluidos = set(videos_excluidos) if not isinstance(videos_excluidos, set) else videos_excluidos
             ids_excluir.update(videos_excluidos)
             logger.info(f"Videos excluidos por historial: {len(videos_excluidos)}")
 
@@ -1054,12 +1055,15 @@ class RecommendationEngine:
             logger.error(f"Error obteniendo flows vistos usuario {user_id}: {e}")
             return set()
 
-    def _seleccionar_flows_para_usuario(self, user_id, n=24, excluded_ids=[]):
+    def _seleccionar_flows_para_usuario(self, user_id, n=24, excluded_ids=None):
         """
         Selecciona flows ordenados por relevancia para el usuario.
         No repite flows hasta agotar todos los disponibles.
         Excluye flows en excluded_ids para scroll infinito.
         """
+        if excluded_ids is None:
+            excluded_ids = []
+
         if self.flows_df is None or len(self.flows_df) == 0:
             return []
 
@@ -1105,12 +1109,15 @@ class RecommendationEngine:
         logger.info(f"Seleccionados {len(flow_ids)} flows para usuario {user_id}")
         return flow_ids
 
-    def generar_feed_flows_only(self, user_id, n_flows=24, excluded_ids=[]):
+    def generar_feed_flows_only(self, user_id, n_flows=24, excluded_ids=None):
         """
         Genera feed de SOLO flows para endpoint be_discover.
         Siempre devuelve 24 flows ordenados por relevancia.
         Excluye flows en excluded_ids para scroll infinito.
         """
+        if excluded_ids is None:
+            excluded_ids = []
+
         tiempo_inicio = time.time()
 
         logger.info(f"Generando feed flows_only para usuario {user_id}, excluyendo {len(excluded_ids)} flows")
