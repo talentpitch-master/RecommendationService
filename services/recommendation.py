@@ -1,28 +1,47 @@
-import sys
-from pathlib import Path
-import time
 import json
-import numpy as np
-import pandas as pd
+import time
 from collections import Counter, defaultdict
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+import numpy as np
+import pandas as pd
 from scipy.spatial.distance import cosine
+
 from core.database import MySQLConnection
 from utils.logger import LoggerConfig
 
 logger = LoggerConfig.get_logger(__name__)
 
+
 class BanditContextualAdaptativo:
     """
-    Implementacion de algoritmo de Contextual Bandits con exploracion adaptativa.
+    Algoritmo de Contextual Bandits con exploracion adaptativa.
+
     Utiliza LinUCB para balancear exploracion-explotacion en recomendaciones.
     Ajusta parametros dinamicamente segun varianza de recompensas recientes.
     """
 
-    def __init__(self, n_features, alpha=1.0, beta=0.5):
+    RIDGE_REGULARIZATION: float = 0.001
+    MIN_HISTORY_FOR_ADAPTATION: int = 10
+    RECENT_REWARDS_WINDOW: int = 50
+    MAX_HISTORY_SIZE: int = 1000
+    HISTORY_TRIM_SIZE: int = 500
+
+    def __init__(
+        self,
+        n_features: int,
+        alpha: float = 1.0,
+        beta: float = 0.5
+    ) -> None:
         """
-        Inicializa el bandit contextual con matrices de Ridge Regression.
-        Configura parametros alpha (exploracion) y beta (adaptacion).
+        Inicializa bandit contextual con matrices de Ridge Regression.
+
+        Args:
+            n_features: Numero de features contextuales
+            alpha: Parametro de exploracion UCB
+            beta: Parametro de adaptacion de exploracion
         """
         self.alpha = alpha
         self.beta = beta
@@ -31,95 +50,150 @@ class BanditContextualAdaptativo:
         self.b = np.zeros(n_features)
         self.theta = np.zeros(n_features)
         self.A_inv = np.identity(n_features)
-        self.historial_recompensas = []
-        self.historial_contextos = []
+        self.historial_recompensas: List[float] = []
+        self.historial_contextos: List[np.ndarray] = []
 
-    def seleccionar_lote(self, contextos):
+    def seleccionar_lote(self, contextos: np.ndarray) -> np.ndarray:
         """
-        Selecciona videos usando Upper Confidence Bound (UCB) en batch.
-        Calcula recompensas esperadas + incertidumbre + exploracion adaptativa.
-        Retorna array de scores UCB para cada video candidato.
+        Selecciona videos usando Upper Confidence Bound en batch.
+
+        Args:
+            contextos: Matriz de features contextuales (n_videos, n_features)
+
+        Returns:
+            Array de scores UCB para cada video candidato
         """
         self.theta = self.A_inv.dot(self.b)
         recompensas_esperadas = contextos.dot(self.theta)
-        incertidumbres = self.alpha * np.sqrt(np.sum(contextos.dot(self.A_inv) * contextos, axis=1))
+        incertidumbres = self.alpha * np.sqrt(
+            np.sum(contextos.dot(self.A_inv) * contextos, axis=1)
+        )
         bonus_exploracion = self._calcular_exploracion_adaptativa(contextos)
         ucb = recompensas_esperadas + incertidumbres + bonus_exploracion
         return ucb
 
-    def _calcular_exploracion_adaptativa(self, contextos):
+    def _calcular_exploracion_adaptativa(
+        self,
+        contextos: np.ndarray
+    ) -> np.ndarray:
         """
-        Calcula bonus de exploracion adaptativo basado en varianza de recompensas.
-        Mayor varianza = mayor exploracion. Retorna menor exploracion en primeras 10 selecciones.
+        Calcula bonus de exploracion adaptativo segun varianza de recompensas.
+
+        Args:
+            contextos: Matriz de features contextuales
+
+        Returns:
+            Array de bonus de exploracion por video
         """
-        if len(self.historial_recompensas) < 10:
+        if len(self.historial_recompensas) < self.MIN_HISTORY_FOR_ADAPTATION:
             return np.full(len(contextos), 0.7)
 
-        recompensas_recientes = self.historial_recompensas[-50:]
+        recompensas_recientes = (
+            self.historial_recompensas[-self.RECENT_REWARDS_WINDOW:]
+        )
         varianza_recompensas = np.var(recompensas_recientes)
         factor_exploracion = self.beta * varianza_recompensas * 1.3
         return factor_exploracion * np.random.uniform(0, 1, len(contextos))
 
-    def actualizar(self, contexto, recompensa):
+    def actualizar(self, contexto: np.ndarray, recompensa: float) -> None:
         """
-        Actualiza modelo con feedback de usuario (contexto y recompensa).
-        Recalcula matrices A, b y theta usando Ridge Regression online.
-        Mantiene historial de ultimas 1000 interacciones.
+        Actualiza modelo con feedback de usuario.
+
+        Args:
+            contexto: Vector de features contextuales
+            recompensa: Recompensa observada
         """
         self.A += np.outer(contexto, contexto)
         self.b += recompensa * contexto
-        self.A_inv = np.linalg.inv(self.A + 0.001 * np.identity(self.n_features))
+        self.A_inv = np.linalg.inv(
+            self.A + self.RIDGE_REGULARIZATION * np.identity(self.n_features)
+        )
         self.historial_recompensas.append(recompensa)
         self.historial_contextos.append(contexto)
 
-        if len(self.historial_recompensas) > 1000:
-            self.historial_recompensas = self.historial_recompensas[-500:]
-            self.historial_contextos = self.historial_contextos[-500:]
+        if len(self.historial_recompensas) > self.MAX_HISTORY_SIZE:
+            self.historial_recompensas = (
+                self.historial_recompensas[-self.HISTORY_TRIM_SIZE:]
+            )
+            self.historial_contextos = (
+                self.historial_contextos[-self.HISTORY_TRIM_SIZE:]
+            )
 
-    def obtener_estadisticas_rendimiento(self):
+    def obtener_estadisticas_rendimiento(self) -> Dict[str, Any]:
         """
         Obtiene metricas de rendimiento del bandit.
-        Retorna recompensa promedio total, reciente y numero de selecciones.
+
+        Returns:
+            Diccionario con estadisticas de rendimiento
         """
         if len(self.historial_recompensas) == 0:
             return {'recompensa_promedio': 0, 'total_selecciones': 0}
 
+        promedio_reciente = (
+            np.mean(self.historial_recompensas[-50:])
+            if len(self.historial_recompensas) >= 50
+            else np.mean(self.historial_recompensas)
+        )
+
         return {
             'recompensa_promedio': np.mean(self.historial_recompensas),
             'total_selecciones': len(self.historial_recompensas),
-            'promedio_reciente': np.mean(self.historial_recompensas[-50:]) if len(self.historial_recompensas) >= 50 else np.mean(self.historial_recompensas)
+            'promedio_reciente': promedio_reciente
         }
 
 
 class RecommendationEngine:
     """
     Motor de recomendaciones singleton con bandits contextuales.
+
     Implementa patron mixto VMP-AU-AU-VMP-NU-FW para feed infinito.
     Combina collaborative filtering, content-based y social signals.
     Usa embeddings de skills, grafo social y scores precalculados.
     """
 
-    _instancia = None
-    _inicializado = False
+    _instancia: Optional['RecommendationEngine'] = None
+    _inicializado: bool = False
 
-    def __new__(cls, data_service=None):
+    N_FEATURES: int = 18
+    PATRON_FEED: List[str] = ['VMP', 'AU', 'AU', 'VMP', 'NU', 'FW']
+    VIDEOS_POR_RESPUESTA: int = 24
+    VENTANA_DIVERSIDAD_CREADORES: int = 12
+    MAX_SKILLS_POR_VIDEO: int = 5
+    MAX_KNOWLEDGE_POR_VIDEO: int = 3
+    MAX_TOOLS_POR_VIDEO: int = 3
+    MAX_LANGUAGES_POR_VIDEO: int = 3
+
+    def __new__(
+        cls,
+        data_service: Optional[Any] = None
+    ) -> 'RecommendationEngine':
+        """
+        Crea nueva instancia usando patron singleton.
+
+        Args:
+            data_service: Servicio de datos
+
+        Returns:
+            Instancia unica de RecommendationEngine
+        """
         cls._instancia = super(RecommendationEngine, cls).__new__(cls)
         return cls._instancia
 
-    def __init__(self, data_service):
+    def __init__(self, data_service: Any) -> None:
         """
         Inicializa motor de recomendaciones con datos desde DataService.
-        Construye embeddings, grafo social, matrices lookup y bandits.
-        Precalcula scores avanzados para optimizar seleccion de videos.
+
+        Args:
+            data_service: Instancia de DataService con datos cargados
         """
         self.data_service = data_service
         self.videos_df = data_service.videos_df
         self.interactions_df = data_service.interactions_df
         self.flows_df = data_service.flows_df
         self.connections_df = data_service.connections_df
-        self.patron = ['VMP', 'AU', 'AU', 'VMP', 'NU', 'FW']
+        self.patron = self.PATRON_FEED
         self.longitud_patron = len(self.patron)
-        self.videos_por_respuesta = 24
+        self.videos_por_respuesta = self.VIDEOS_POR_RESPUESTA
 
         logger.info(f"Inicializando recommender con {len(self.flows_df)} flows")
 
@@ -130,97 +204,113 @@ class RecommendationEngine:
         self._inicializar_bandits()
         self._precalcular_scores_avanzados()
 
-    def _cachear_datos_videos(self):
+    def _cachear_datos_videos(self) -> None:
         """
         Construye cache de skills, knowledges, tools y languages por video.
+
         Extrae y parsea JSON de cada video a sets para lookup O(1).
         Mapea video_id a creator_id y video_url.
         """
         logger.info("Cacheando datos de videos para acceso rapido")
 
-        self.cache_skills_video = {}
-        self.cache_knowledges_video = {}
-        self.cache_tools_video = {}
-        self.cache_languages_video = {}
-        self.video_a_creador = {}
-        self.video_a_url = {}
+        self.cache_skills_video: Dict[int, Set[str]] = {}
+        self.cache_knowledges_video: Dict[int, Set[str]] = {}
+        self.cache_tools_video: Dict[int, Set[str]] = {}
+        self.cache_languages_video: Dict[int, Set[str]] = {}
+        self.video_a_creador: Dict[int, int] = {}
+        self.video_a_url: Dict[int, str] = {}
 
         for idx, row in self.videos_df.iterrows():
             video_id = row['id']
 
-            skills = set()
-            try:
-                if pd.notna(row.get('video_skills')):
-                    skills_data = json.loads(row['video_skills']) if isinstance(row['video_skills'], str) else row['video_skills']
-                    if isinstance(skills_data, list):
-                        skills = set(skills_data[:5])
-            except:
-                pass
+            self.cache_skills_video[video_id] = self._parse_json_to_set(
+                row.get('video_skills'),
+                self.MAX_SKILLS_POR_VIDEO
+            )
+            self.cache_knowledges_video[video_id] = self._parse_json_to_set(
+                row.get('video_knowledges'),
+                self.MAX_KNOWLEDGE_POR_VIDEO
+            )
+            self.cache_tools_video[video_id] = self._parse_json_to_set(
+                row.get('video_tools'),
+                self.MAX_TOOLS_POR_VIDEO
+            )
+            self.cache_languages_video[video_id] = self._parse_json_to_set(
+                row.get('video_languages'),
+                self.MAX_LANGUAGES_POR_VIDEO
+            )
 
-            knowledges = set()
-            try:
-                if pd.notna(row.get('video_knowledges')):
-                    know_data = json.loads(row['video_knowledges']) if isinstance(row['video_knowledges'], str) else row['video_knowledges']
-                    if isinstance(know_data, list):
-                        knowledges = set(know_data[:3])
-            except:
-                pass
-
-            tools = set()
-            try:
-                if pd.notna(row.get('video_tools')):
-                    tools_data = json.loads(row['video_tools']) if isinstance(row['video_tools'], str) else row['video_tools']
-                    if isinstance(tools_data, list):
-                        tools = set(tools_data[:3])
-            except:
-                pass
-
-            languages = set()
-            try:
-                if pd.notna(row.get('video_languages')):
-                    lang_data = json.loads(row['video_languages']) if isinstance(row['video_languages'], str) else row['video_languages']
-                    if isinstance(lang_data, list):
-                        languages = set(lang_data[:3])
-            except:
-                pass
-
-            self.cache_skills_video[video_id] = skills
-            self.cache_knowledges_video[video_id] = knowledges
-            self.cache_tools_video[video_id] = tools
-            self.cache_languages_video[video_id] = languages
             self.video_a_creador[video_id] = row['user_id']
             self.video_a_url[video_id] = row['video']
 
         logger.info(f"Datos cacheados para {len(self.cache_skills_video)} videos")
 
-    def _video_en_lista_negra(self, video_id):
+    def _parse_json_to_set(
+        self,
+        field_value: Any,
+        max_items: int
+    ) -> Set[str]:
         """
-        Verifica si un video esta en la blacklist de URLs.
-        Retorna True si la URL del video esta bloqueada.
+        Parsea campo JSON a set de strings.
+
+        Args:
+            field_value: Valor del campo a parsear
+            max_items: Numero maximo de items a extraer
+
+        Returns:
+            Set de strings parseados
+        """
+        result: Set[str] = set()
+        try:
+            if pd.notna(field_value):
+                data = (
+                    json.loads(field_value)
+                    if isinstance(field_value, str)
+                    else field_value
+                )
+                if isinstance(data, list):
+                    result = set(data[:max_items])
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.debug(f"Error parsing JSON field: {e}")
+
+        return result
+
+    def _video_en_lista_negra(self, video_id: int) -> bool:
+        """
+        Verifica si video esta en blacklist de URLs.
+
+        Args:
+            video_id: ID del video
+
+        Returns:
+            True si URL del video esta bloqueada
         """
         if video_id not in self.video_a_url:
             return False
         video_url = self.video_a_url[video_id]
         return video_url in self.data_service.lista_negra
 
-    def _construir_embeddings_skills(self):
+    def _construir_embeddings_skills(self) -> None:
         """
         Construye embeddings de skills usando matriz de coocurrencia normalizada.
+
         Calcula frecuencias de skills y relaciones entre ellos.
         Genera skill_a_idx, idx_a_skill y embeddings_skills para similitud.
         """
         logger.info("Construyendo embeddings avanzados de skills")
 
-        todos_skills = set()
+        todos_skills: Set[str] = set()
         for skills in self.cache_skills_video.values():
             todos_skills.update(skills)
 
-        self.skill_a_idx = {skill: idx for idx, skill in enumerate(sorted(todos_skills))}
+        self.skill_a_idx = {
+            skill: idx for idx, skill in enumerate(sorted(todos_skills))
+        }
         self.idx_a_skill = {idx: skill for skill, idx in self.skill_a_idx.items()}
         n_skills = len(self.skill_a_idx)
 
         coocurrencia = np.zeros((n_skills, n_skills))
-        conteo_skills = Counter()
+        conteo_skills: Counter[str] = Counter()
 
         for skills in self.cache_skills_video.values():
             lista_skills = list(skills)
@@ -264,16 +354,17 @@ class RecommendationEngine:
 
         logger.info(f"Embeddings construidos para {n_skills} skills")
 
-    def _construir_grafo_social(self):
+    def _construir_grafo_social(self) -> None:
         """
         Construye grafo de conexiones sociales entre usuarios.
-        Calcula scores de influencia basados en numero de conexiones (log scale).
+
+        Calcula scores de influencia basados en numero de conexiones.
         Genera grafo_social y influencia_social para social signals.
         """
         logger.info("Construyendo grafo social con scores de influencia")
 
-        self.grafo_social = defaultdict(set)
-        self.influencia_social = defaultdict(float)
+        self.grafo_social: Dict[int, Set[int]] = defaultdict(set)
+        self.influencia_social: Dict[int, float] = defaultdict(float)
 
         if self.connections_df is not None and len(self.connections_df) > 0:
             for _, row in self.connections_df.iterrows():
@@ -284,62 +375,84 @@ class RecommendationEngine:
 
         logger.info(f"Grafo social construido: {len(self.grafo_social)} usuarios")
 
-    def _construir_matrices_lookup(self):
+    def _construir_matrices_lookup(self) -> None:
         """
         Pre-construye matrices y diccionarios de lookup para procesamiento vectorizado.
+
         Crea indices rapidos para skills, knowledges, tools y languages.
         Genera matrices binarias por video para calculo batch de similitudes.
         """
         logger.info("Pre-construyendo matrices de lookup para vectorizacion")
 
-        todos_skills = sorted(set().union(*self.cache_skills_video.values()))
-        todos_knowledges = sorted(set().union(*self.cache_knowledges_video.values()))
-        todos_tools = sorted(set().union(*self.cache_tools_video.values()))
-        todos_languages = sorted(set().union(*self.cache_languages_video.values()))
+        self.all_skills = sorted(set().union(*self.cache_skills_video.values()))
+        self.all_knowledges = sorted(
+            set().union(*self.cache_knowledges_video.values())
+        )
+        self.all_tools = sorted(set().union(*self.cache_tools_video.values()))
+        self.all_languages = sorted(
+            set().union(*self.cache_languages_video.values())
+        )
 
-        self.all_skills = todos_skills
-        self.all_knowledges = todos_knowledges
-        self.all_tools = todos_tools
-        self.all_languages = todos_languages
-
-        self.skill_to_idx_fast = {s: i for i, s in enumerate(todos_skills)}
-        self.knowledge_to_idx_fast = {k: i for i, k in enumerate(todos_knowledges)}
-        self.tool_to_idx_fast = {t: i for i, t in enumerate(todos_tools)}
-        self.language_to_idx_fast = {l: i for i, l in enumerate(todos_languages)}
+        self.skill_to_idx_fast = {s: i for i, s in enumerate(self.all_skills)}
+        self.knowledge_to_idx_fast = {
+            k: i for i, k in enumerate(self.all_knowledges)
+        }
+        self.tool_to_idx_fast = {t: i for i, t in enumerate(self.all_tools)}
+        self.language_to_idx_fast = {
+            l: i for i, l in enumerate(self.all_languages)
+        }
 
         logger.info("Matrices de lookup construidas")
 
-    def _inicializar_bandits(self):
+    def _inicializar_bandits(self) -> None:
         """
         Inicializa bandits contextuales para cada categoria de video.
-        VMP (alpha=1.5), AU (alpha=1.8), NU (alpha=2.5) con mayor exploracion para nuevos.
+
+        VMP, AU, NU con parametros especificos de exploracion.
         Cada bandit aprende independientemente de feedback de usuarios.
         """
         logger.info("Inicializando bandits contextuales adaptativos")
 
-        n_features = 18
-        self.bandit_vmp = BanditContextualAdaptativo(n_features, alpha=1.5, beta=0.8)
-        self.bandit_au = BanditContextualAdaptativo(n_features, alpha=1.8, beta=1.0)
-        self.bandit_nu = BanditContextualAdaptativo(n_features, alpha=2.5, beta=1.3)
+        self.bandit_vmp = BanditContextualAdaptativo(
+            self.N_FEATURES,
+            alpha=1.5,
+            beta=0.8
+        )
+        self.bandit_au = BanditContextualAdaptativo(
+            self.N_FEATURES,
+            alpha=1.3,
+            beta=0.7
+        )
+        self.bandit_nu = BanditContextualAdaptativo(
+            self.N_FEATURES,
+            alpha=1.8,
+            beta=0.9
+        )
 
-    def _precalcular_scores_avanzados(self):
+    def _precalcular_scores_avanzados(self) -> None:
         """
         Precalcula multiples scores combinados para cada video.
+
         Calcula engagement, temporal, calidad, popularidad, diversidad y rareza.
         Normaliza metricas y aplica transformaciones logaritmicas.
-        Genera columnas agregadas en videos_df para lookup rapido.
         """
         logger.info("Precalculando scores avanzados con gates de calidad")
 
         df = self.videos_df.copy()
 
         views_log = np.log1p(df['views'].astype(float))
-        views_norm = (views_log - views_log.min()) / (views_log.max() - views_log.min() + 1e-6)
+        views_norm = (
+            (views_log - views_log.min()) /
+            (views_log.max() - views_log.min() + 1e-6)
+        )
 
         rating_norm = df['avg_rating'].astype(float) / 5.0
 
         connections_log = np.log1p(df['connection_count'].astype(float))
-        connections_norm = (connections_log - connections_log.min()) / (connections_log.max() - connections_log.min() + 1e-6)
+        connections_norm = (
+            (connections_log - connections_log.min()) /
+            (connections_log.max() - connections_log.min() + 1e-6)
+        )
 
         df['score_engagement'] = (
             views_norm * 0.35 +
@@ -347,13 +460,18 @@ class RecommendationEngine:
             connections_norm * 0.25
         )
 
-        df['score_temporal'] = np.exp(-df['days_since_creation'].astype(float) / 28.0)
+        df['score_temporal'] = np.exp(
+            -df['days_since_creation'].astype(float) / 28.0
+        )
 
         contenido_ultra_nuevo = df['days_since_creation'] <= 30
         df['boost_nuevo'] = 1.0
         df.loc[contenido_ultra_nuevo, 'boost_nuevo'] = 1.5
 
-        peso_rating = df['rating_count'].astype(float) / (df['rating_count'].astype(float) + 10)
+        peso_rating = (
+            df['rating_count'].astype(float) /
+            (df['rating_count'].astype(float) + 10)
+        )
         df['score_calidad'] = (
             df['avg_rating'].astype(float) * peso_rating * 0.7 +
             np.log1p(df['connection_count'].astype(float)) * 0.3
@@ -376,7 +494,9 @@ class RecommendationEngine:
             scores_diversidad_skills.append(total_atributos / 15.0)
 
             if skills:
-                rarezas = [1.0 / (self.conteo_skills.get(s, 1) + 1) for s in skills]
+                rarezas = [
+                    1.0 / (self.conteo_skills.get(s, 1) + 1) for s in skills
+                ]
                 scores_rareza_skills.append(np.mean(rarezas) * 100)
             else:
                 scores_rareza_skills.append(0)
@@ -384,25 +504,36 @@ class RecommendationEngine:
         df['diversidad_skills'] = scores_diversidad_skills
         df['rareza_skills'] = scores_rareza_skills
 
+        es_contenido_nuevo = df['days_since_creation'] < 14
         gate_calidad = (
             (df['avg_rating'] >= 3.0) |
             (df['views'] >= 20) |
             (df['connection_count'] >= 2) |
-            (df['rating_count'] >= 2)
+            (df['rating_count'] >= 2) |
+            es_contenido_nuevo
         )
         df['pasa_gate_calidad'] = gate_calidad.astype(int)
 
         self.videos_df = df
 
-        logger.info("Scores avanzados precalculados con filtros de calidad estrictos")
+        logger.info(
+            "Scores avanzados precalculados con filtros de calidad estrictos"
+        )
 
-    def _obtener_preferencias_usuario_rapido(self, user_id):
+    def _obtener_preferencias_usuario_rapido(
+        self,
+        user_id: int
+    ) -> Dict[str, Any]:
         """
         Extrae preferencias de usuario desde interacciones pasadas.
-        Calcula skills, knowledges, tools, languages, ciudades, red social y vector de skills.
-        Retorna diccionario con preferencias agregadas y ponderadas.
+
+        Args:
+            user_id: ID del usuario
+
+        Returns:
+            Diccionario con preferencias agregadas y ponderadas
         """
-        prefs = {
+        prefs: Dict[str, Any] = {
             'skills': set(),
             'knowledges': set(),
             'tools': set(),
@@ -415,10 +546,13 @@ class RecommendationEngine:
             'score_influencia_social': 0
         }
 
-        if len(self.interactions_df) == 0 or 'user_id' not in self.interactions_df.columns:
+        if (len(self.interactions_df) == 0 or
+                'user_id' not in self.interactions_df.columns):
             return prefs
 
-        interacciones_usuario = self.interactions_df[self.interactions_df['user_id'] == user_id]
+        interacciones_usuario = self.interactions_df[
+            self.interactions_df['user_id'] == user_id
+        ]
 
         if len(interacciones_usuario) == 0:
             return prefs
@@ -429,7 +563,7 @@ class RecommendationEngine:
 
         muestra_vistos = list(prefs['vistos'])[:80]
 
-        contador_skills = Counter()
+        contador_skills: Counter[str] = Counter()
         for vid_id in muestra_vistos:
             if vid_id in self.cache_skills_video:
                 skills = self.cache_skills_video[vid_id]
@@ -448,7 +582,9 @@ class RecommendationEngine:
 
         if contador_skills:
             total_conteo = sum(contador_skills.values())
-            prefs['pesos_skills'] = {s: c/total_conteo for s, c in contador_skills.items()}
+            prefs['pesos_skills'] = {
+                s: c/total_conteo for s, c in contador_skills.items()
+            }
 
         if prefs['skills'] and self.skill_a_idx:
             vector_skills = np.zeros(len(self.skill_a_idx))
@@ -466,11 +602,20 @@ class RecommendationEngine:
 
         return prefs
 
-    def _calcular_similitudes_skills_lote(self, ids_videos, prefs_usuario):
+    def _calcular_similitudes_skills_lote(
+        self,
+        ids_videos: List[int],
+        prefs_usuario: Dict[str, Any]
+    ) -> np.ndarray:
         """
         Calcula similitud coseno entre skills de usuario y videos en batch.
-        Combina similitud vectorial (60%) con solapamiento ponderado (40%).
-        Retorna array de similitudes normalizadas entre 0 y 1.
+
+        Args:
+            ids_videos: Lista de IDs de videos
+            prefs_usuario: Preferencias del usuario
+
+        Returns:
+            Array de similitudes normalizadas entre 0 y 1
         """
         if prefs_usuario['vector_skills'] is None:
             return np.full(len(ids_videos), 0.5)
@@ -484,7 +629,10 @@ class RecommendationEngine:
                     sim = 1 - cosine(prefs_usuario['vector_skills'], vector_video)
 
                     skills_vid = self.cache_skills_video.get(vid_id, set())
-                    solapamiento_ponderado = sum(prefs_usuario['pesos_skills'].get(s, 0) for s in skills_vid)
+                    solapamiento_ponderado = sum(
+                        prefs_usuario['pesos_skills'].get(s, 0)
+                        for s in skills_vid
+                    )
 
                     sim_combinada = sim * 0.6 + solapamiento_ponderado * 0.4
                     similitudes.append(max(0, min(1, sim_combinada)))
@@ -495,11 +643,20 @@ class RecommendationEngine:
 
         return np.array(similitudes)
 
-    def _calcular_match_extendido_vectorizado(self, ids_videos, prefs_usuario):
+    def _calcular_match_extendido_vectorizado(
+        self,
+        ids_videos: List[int],
+        prefs_usuario: Dict[str, Any]
+    ) -> np.ndarray:
         """
         Calcula match score entre preferencias de usuario y atributos de videos.
-        Combina skills (55%), knowledges (20%), tools (15%) y languages (10%).
-        Retorna array de scores de match normalizados.
+
+        Args:
+            ids_videos: Lista de IDs de videos
+            prefs_usuario: Preferencias del usuario
+
+        Returns:
+            Array de scores de match normalizados
         """
         n_videos = len(ids_videos)
 
@@ -533,30 +690,55 @@ class RecommendationEngine:
 
         return scores
 
-    def _extraer_features_contexto_vectorizado(self, df_candidatos, prefs_usuario):
+    def _extraer_features_contexto_vectorizado(
+        self,
+        df_candidatos: pd.DataFrame,
+        prefs_usuario: Dict[str, Any]
+    ) -> np.ndarray:
         """
-        Extrae 18 features contextuales para cada video candidato.
-        Combina engagement, temporal, calidad, social, diversidad y rareza.
-        Retorna matriz numpy (n_videos, 18) normalizada para bandits.
+        Extrae features contextuales para cada video candidato.
+
+        Args:
+            df_candidatos: DataFrame con videos candidatos
+            prefs_usuario: Preferencias del usuario
+
+        Returns:
+            Matriz numpy (n_videos, N_FEATURES) normalizada para bandits
         """
         n_candidatos = len(df_candidatos)
-        features = np.zeros((n_candidatos, 18))
+        features = np.zeros((n_candidatos, self.N_FEATURES))
 
         features[:, 0] = df_candidatos['score_engagement'].values
-        features[:, 1] = df_candidatos['score_temporal'].values * df_candidatos['boost_nuevo'].values
+        features[:, 1] = (
+            df_candidatos['score_temporal'].values *
+            df_candidatos['boost_nuevo'].values
+        )
         features[:, 2] = df_candidatos['score_calidad'].values
         features[:, 3] = df_candidatos['score_popularidad'].values
         features[:, 4] = df_candidatos['diversidad_skills'].values
 
         ids_videos = df_candidatos['id'].tolist()
-        features[:, 5] = self._calcular_similitudes_skills_lote(ids_videos, prefs_usuario)
+        features[:, 5] = self._calcular_similitudes_skills_lote(
+            ids_videos,
+            prefs_usuario
+        )
 
-        features[:, 6] = self._calcular_match_extendido_vectorizado(ids_videos, prefs_usuario) / 100.0
+        features[:, 6] = (
+            self._calcular_match_extendido_vectorizado(ids_videos, prefs_usuario) /
+            100.0
+        )
 
-        coincidencias_ciudad = df_candidatos['city'].isin(prefs_usuario['cities']).astype(float).values
+        coincidencias_ciudad = (
+            df_candidatos['city'].isin(prefs_usuario['cities']).astype(float).values
+        )
         features[:, 7] = coincidencias_ciudad
 
-        coincidencias_sociales = df_candidatos['user_id'].isin(prefs_usuario['red_social']).astype(float).values
+        coincidencias_sociales = (
+            df_candidatos['user_id']
+            .isin(prefs_usuario['red_social'])
+            .astype(float)
+            .values
+        )
         features[:, 8] = coincidencias_sociales
 
         features[:, 9] = np.log1p(df_candidatos['views'].values) / 10.0
@@ -568,21 +750,43 @@ class RecommendationEngine:
 
         features[:, 13] = prefs_usuario['score_influencia_social']
 
-        features[:, 14] = df_candidatos['rating_count'].values / (df_candidatos['rating_count'].values.max() + 1)
+        features[:, 14] = (
+            df_candidatos['rating_count'].values /
+            (df_candidatos['rating_count'].values.max() + 1)
+        )
 
-        features[:, 15] = df_candidatos['like_count'].values / (df_candidatos['like_count'].values.max() + 1)
+        features[:, 15] = (
+            df_candidatos['like_count'].values /
+            (df_candidatos['like_count'].values.max() + 1)
+        )
 
-        features[:, 16] = df_candidatos['exhibited_count'].values / (df_candidatos['exhibited_count'].values.max() + 1)
+        features[:, 16] = (
+            df_candidatos['exhibited_count'].values /
+            (df_candidatos['exhibited_count'].values.max() + 1)
+        )
 
         features[:, 17] = np.random.uniform(0, 0.3, n_candidatos)
 
         return features
 
-    def _seleccionar_vmp_rapido(self, ids_excluir, prefs_usuario, creadores_usados, n=110):
+    def _seleccionar_vmp_rapido(
+        self,
+        ids_excluir: Set[int],
+        prefs_usuario: Dict[str, Any],
+        creadores_usados: Set[int],
+        n: int = 110
+    ) -> List[int]:
         """
-        Selecciona videos VMP (Muy Mejor Puntuados) usando bandit contextual.
-        Filtra por calidad, aplica UCB y combina con engagement/popularidad.
-        Prioriza contenido nuevo (<45 dias). Retorna lista de video IDs.
+        Selecciona videos VMP usando bandit contextual.
+
+        Args:
+            ids_excluir: Set de IDs de videos a excluir
+            prefs_usuario: Preferencias del usuario
+            creadores_usados: Set de IDs de creadores ya usados
+            n: Numero de videos a seleccionar
+
+        Returns:
+            Lista de video IDs seleccionados
         """
         candidatos = self.videos_df[
             (~self.videos_df['id'].isin(ids_excluir)) &
@@ -599,7 +803,10 @@ class RecommendationEngine:
         if len(candidatos) == 0:
             return []
 
-        features = self._extraer_features_contexto_vectorizado(candidatos, prefs_usuario)
+        features = self._extraer_features_contexto_vectorizado(
+            candidatos,
+            prefs_usuario
+        )
 
         scores_ucb = self.bandit_vmp.seleccionar_lote(features)
 
@@ -611,7 +818,10 @@ class RecommendationEngine:
         mascara_nuevo_contenido = candidatos['days_since_creation'] <= 45
         candidatos.loc[mascara_nuevo_contenido, 'score_vmp'] += 1.4
 
-        top_candidatos = candidatos.nlargest(min(n*2, len(candidatos)), 'score_vmp')
+        top_candidatos = candidatos.nlargest(
+            min(n*2, len(candidatos)),
+            'score_vmp'
+        )
 
         tamanio_muestra = min(n, len(top_candidatos))
         pesos_arr = top_candidatos['score_vmp'].values
@@ -631,11 +841,24 @@ class RecommendationEngine:
 
         return top_candidatos.iloc[indices_seleccionados]['id'].tolist()
 
-    def _seleccionar_nu_rapido(self, ids_excluir, prefs_usuario, creadores_usados, n=95):
+    def _seleccionar_nu_rapido(
+        self,
+        ids_excluir: Set[int],
+        prefs_usuario: Dict[str, Any],
+        creadores_usados: Set[int],
+        n: int = 95
+    ) -> List[int]:
         """
-        Selecciona videos NU (Nuevo) usando bandit contextual.
-        Filtra solo contenido reciente (<45 dias) y prioriza diversidad/rareza.
-        Aplica muestreo aleatorio ponderado. Retorna lista de video IDs.
+        Selecciona videos NU usando bandit contextual.
+
+        Args:
+            ids_excluir: Set de IDs de videos a excluir
+            prefs_usuario: Preferencias del usuario
+            creadores_usados: Set de IDs de creadores ya usados
+            n: Numero de videos a seleccionar
+
+        Returns:
+            Lista de video IDs seleccionados
         """
         candidatos = self.videos_df[
             (~self.videos_df['id'].isin(ids_excluir)) &
@@ -646,7 +869,10 @@ class RecommendationEngine:
         if len(candidatos) == 0:
             return []
 
-        features = self._extraer_features_contexto_vectorizado(candidatos, prefs_usuario)
+        features = self._extraer_features_contexto_vectorizado(
+            candidatos,
+            prefs_usuario
+        )
 
         scores_ucb = self.bandit_nu.seleccionar_lote(features)
 
@@ -657,18 +883,34 @@ class RecommendationEngine:
         candidatos['score_nu'] += candidatos['boost_nuevo'] * 0.8
         candidatos['score_nu'] += np.random.uniform(0, 0.6, len(candidatos))
 
-        top_candidatos = candidatos.nlargest(min(n*2, len(candidatos)), 'score_nu')
+        top_candidatos = candidatos.nlargest(
+            min(n*2, len(candidatos)),
+            'score_nu'
+        )
 
         if len(top_candidatos) > n:
             return top_candidatos.sample(n=n)['id'].tolist()
 
         return top_candidatos['id'].tolist()
 
-    def _seleccionar_au_rapido(self, ids_excluir, prefs_usuario, creadores_usados, n=170):
+    def _seleccionar_au_rapido(
+        self,
+        ids_excluir: Set[int],
+        prefs_usuario: Dict[str, Any],
+        creadores_usados: Set[int],
+        n: int = 170
+    ) -> List[int]:
         """
-        Selecciona videos AU (Afin al Usuario) usando bandit contextual.
-        Prioriza similitud de skills, match extendido y señales sociales.
-        Aplica muestreo ponderado por scores. Retorna lista de video IDs.
+        Selecciona videos AU usando bandit contextual.
+
+        Args:
+            ids_excluir: Set de IDs de videos a excluir
+            prefs_usuario: Preferencias del usuario
+            creadores_usados: Set de IDs de creadores ya usados
+            n: Numero de videos a seleccionar
+
+        Returns:
+            Lista de video IDs seleccionados
         """
         candidatos = self.videos_df[
             (~self.videos_df['id'].isin(ids_excluir)) &
@@ -678,13 +920,16 @@ class RecommendationEngine:
         if len(candidatos) == 0:
             return []
 
-        features = self._extraer_features_contexto_vectorizado(candidatos, prefs_usuario)
+        features = self._extraer_features_contexto_vectorizado(
+            candidatos,
+            prefs_usuario
+        )
 
         scores_ucb = self.bandit_au.seleccionar_lote(features)
 
         candidatos['score_au'] = scores_ucb
-        candidatos['score_au'] += features[:, 5] * 2.8
-        candidatos['score_au'] += features[:, 6] * 2.5
+        candidatos['score_au'] += features[:, 5] * 3.5
+        candidatos['score_au'] += features[:, 6] * 3.0
         candidatos['score_au'] += candidatos['score_popularidad'] * 1.1
         candidatos['score_au'] += candidatos['score_calidad'] * 1.4
         candidatos['score_au'] += candidatos['score_temporal'] * 0.9
@@ -693,15 +938,29 @@ class RecommendationEngine:
         mascara_nuevo_contenido = candidatos['days_since_creation'] <= 45
         candidatos.loc[mascara_nuevo_contenido, 'score_au'] += 0.9
 
-        top_candidatos = candidatos.nlargest(min(n, len(candidatos)), 'score_au')
+        top_candidatos = candidatos.nlargest(
+            min(n, len(candidatos)),
+            'score_au'
+        )
 
         return top_candidatos['id'].tolist()
 
-    def _seleccionar_flows(self, ids_excluir, creadores_usados, n=40):
+    def _seleccionar_flows(
+        self,
+        ids_excluir: Set[int],
+        creadores_usados: Set[int],
+        n: int = 40
+    ) -> List[int]:
         """
-        Selecciona challenges/flows para categoria FW (Flows).
-        Prioriza contenido reciente con score aleatorio + temporal.
-        Retorna lista de flow IDs.
+        Selecciona challenges/flows para categoria FW.
+
+        Args:
+            ids_excluir: Set de IDs de flows a excluir
+            creadores_usados: Set de IDs de creadores ya usados
+            n: Numero de flows a seleccionar
+
+        Returns:
+            Lista de flow IDs seleccionados
         """
         if self.flows_df is None or len(self.flows_df) == 0:
             return []
@@ -722,11 +981,22 @@ class RecommendationEngine:
         top_flows = candidatos.nlargest(min(n, len(candidatos)), 'score_flow')
         return top_flows['id'].tolist()
 
-    def _seleccionar_boost_exploracion(self, ids_excluir, creadores_usados, n=75):
+    def _seleccionar_boost_exploracion(
+        self,
+        ids_excluir: Set[int],
+        creadores_usados: Set[int],
+        n: int = 75
+    ) -> List[int]:
         """
         Selecciona videos aleatorios para boost de exploracion.
-        Muestreo completamente aleatorio sin scoring.
-        Retorna lista de video IDs.
+
+        Args:
+            ids_excluir: Set de IDs de videos a excluir
+            creadores_usados: Set de IDs de creadores ya usados
+            n: Numero de videos a seleccionar
+
+        Returns:
+            Lista de video IDs seleccionados aleatoriamente
         """
         candidatos = self.videos_df[
             (~self.videos_df['id'].isin(ids_excluir)) &
@@ -739,12 +1009,24 @@ class RecommendationEngine:
         tamanio_muestra = min(n, len(candidatos))
         return candidatos.sample(n=tamanio_muestra)['id'].tolist()
 
-    def generar_scroll_infinito(self, user_id, n_videos=24, videos_excluidos=None, incluir_fw=True):
+    def generar_scroll_infinito(
+        self,
+        user_id: int,
+        n_videos: int = 24,
+        videos_excluidos: Optional[List[int]] = None,
+        incluir_fw: bool = True
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Genera feed infinito mezclando videos y flows segun patron VMP-AU-AU-VMP-NU-FW.
-        Siempre devuelve 24 videos (4 repeticiones del patron de 6).
-        No repite creadores en 12 videos consecutivos (2 patrones).
-        Retorna diccionario con videos, flows, tipo_patron y metricas de rendimiento.
+        Genera feed infinito mezclando videos y flows segun patron.
+
+        Args:
+            user_id: ID del usuario
+            n_videos: Numero de videos a generar (siempre 24)
+            videos_excluidos: Lista de IDs de videos a excluir
+            incluir_fw: Si incluir flows en el feed
+
+        Returns:
+            Tupla con lista de videos y metricas de rendimiento
         """
         n_videos = self.videos_por_respuesta
         tiempo_inicio = time.time()
@@ -755,29 +1037,60 @@ class RecommendationEngine:
 
         ids_excluir = prefs_usuario['vistos'].copy()
         if videos_excluidos:
-            videos_excluidos = set(videos_excluidos) if not isinstance(videos_excluidos, set) else videos_excluidos
-            ids_excluir.update(videos_excluidos)
+            videos_excluidos_set = (
+                set(videos_excluidos)
+                if not isinstance(videos_excluidos, set)
+                else videos_excluidos
+            )
+            ids_excluir.update(videos_excluidos_set)
             logger.info(f"Videos excluidos por historial: {len(videos_excluidos)}")
 
-        creadores_usados = set()
+        creadores_usados: Set[int] = set()
 
-        pool_vmp = self._seleccionar_vmp_rapido(ids_excluir, prefs_usuario, creadores_usados, n=110)
-        pool_nu = self._seleccionar_nu_rapido(ids_excluir, prefs_usuario, creadores_usados, n=95)
+        pool_vmp = self._seleccionar_vmp_rapido(
+            ids_excluir,
+            prefs_usuario,
+            creadores_usados,
+            n=110
+        )
+        pool_nu = self._seleccionar_nu_rapido(
+            ids_excluir,
+            prefs_usuario,
+            creadores_usados,
+            n=95
+        )
         excluir_para_au = ids_excluir | set(pool_vmp) | set(pool_nu)
-        pool_au = self._seleccionar_au_rapido(excluir_para_au, prefs_usuario, creadores_usados, n=170)
+        pool_au = self._seleccionar_au_rapido(
+            excluir_para_au,
+            prefs_usuario,
+            creadores_usados,
+            n=170
+        )
         if incluir_fw:
-            pool_flows = self._seleccionar_flows(ids_excluir, creadores_usados, n=40)
+            pool_flows = self._seleccionar_flows(
+                ids_excluir,
+                creadores_usados,
+                n=40
+            )
         else:
             pool_flows = []
-        pool_exploracion = self._seleccionar_boost_exploracion(excluir_para_au | set(pool_au), creadores_usados, n=75)
+        pool_exploracion = self._seleccionar_boost_exploracion(
+            excluir_para_au | set(pool_au),
+            creadores_usados,
+            n=75
+        )
 
-        logger.info(f"Pools generados - VMP: {len(pool_vmp)}, NU: {len(pool_nu)}, AU: {len(pool_au)}, FLOWS: {len(pool_flows)}, EXPLORE: {len(pool_exploracion)}")
+        logger.info(
+            f"Pools generados - VMP: {len(pool_vmp)}, NU: {len(pool_nu)}, "
+            f"AU: {len(pool_au)}, FLOWS: {len(pool_flows)}, "
+            f"EXPLORE: {len(pool_exploracion)}"
+        )
 
-        feed = []
-        ids_usados = set()
-        skills_usados = set()
-        creadores_usados_en_feed = set()
-        creadores_por_ventana = []
+        feed: List[Dict[str, Any]] = []
+        ids_usados: Set[int] = set()
+        skills_usados: Set[str] = set()
+        creadores_usados_en_feed: Set[int] = set()
+        creadores_por_ventana: List[int] = []
 
         idx_vmp = 0
         idx_nu = 0
@@ -792,14 +1105,21 @@ class RecommendationEngine:
                 if len(feed) >= n_videos:
                     break
 
-                if len(feed) > 0 and len(feed) % 12 == 0:
-                    if len(creadores_por_ventana) >= 12:
-                        creadores_a_remover = creadores_por_ventana[:12]
-                        creadores_usados_en_feed = set([c for c in creadores_usados_en_feed if c not in creadores_a_remover])
-                        creadores_por_ventana = creadores_por_ventana[12:]
+                if len(feed) > 0 and len(feed) % self.VENTANA_DIVERSIDAD_CREADORES == 0:
+                    if len(creadores_por_ventana) >= self.VENTANA_DIVERSIDAD_CREADORES:
+                        creadores_a_remover = (
+                            creadores_por_ventana[:self.VENTANA_DIVERSIDAD_CREADORES]
+                        )
+                        creadores_usados_en_feed = set([
+                            c for c in creadores_usados_en_feed
+                            if c not in creadores_a_remover
+                        ])
+                        creadores_por_ventana = (
+                            creadores_por_ventana[self.VENTANA_DIVERSIDAD_CREADORES:]
+                        )
 
                 tipo_slot = self.patron[pos_patron]
-                video_id = None
+                video_id: Optional[int] = None
                 intentos = 0
                 max_intentos = 150
                 es_flow = False
@@ -835,7 +1155,8 @@ class RecommendationEngine:
 
                         if vid not in ids_usados:
                             creador_vid = self.video_a_creador.get(vid)
-                            if creador_vid is not None and creador_vid not in creadores_usados_en_feed:
+                            if (creador_vid is not None and
+                                    creador_vid not in creadores_usados_en_feed):
                                 skills_vid = self.cache_skills_video.get(vid, set())
                                 skills_nuevos = skills_vid - skills_usados
                                 if len(skills_nuevos) >= 1 or len(skills_usados) < 3:
@@ -852,9 +1173,12 @@ class RecommendationEngine:
 
                             if vid not in ids_usados:
                                 creador_vid = self.video_a_creador.get(vid)
-                                if creador_vid is not None and creador_vid not in creadores_usados_en_feed:
+                                if (creador_vid is not None and
+                                        creador_vid not in creadores_usados_en_feed):
                                     video_id = vid
-                                    skills_usados.update(self.cache_skills_video.get(vid, set()))
+                                    skills_usados.update(
+                                        self.cache_skills_video.get(vid, set())
+                                    )
                                     creadores_usados_en_feed.add(creador_vid)
                                     creadores_por_ventana.append(creador_vid)
                                     break
@@ -870,7 +1194,8 @@ class RecommendationEngine:
 
                         if vid not in ids_usados:
                             creador_vid = self.video_a_creador.get(vid)
-                            if creador_vid is not None and creador_vid not in creadores_usados_en_feed:
+                            if (creador_vid is not None and
+                                    creador_vid not in creadores_usados_en_feed):
                                 skills_vid = self.cache_skills_video.get(vid, set())
                                 skills_nuevos = skills_vid - skills_usados
                                 if len(skills_nuevos) >= 1 or len(skills_usados) < 3:
@@ -887,9 +1212,12 @@ class RecommendationEngine:
 
                             if vid not in ids_usados:
                                 creador_vid = self.video_a_creador.get(vid)
-                                if creador_vid is not None and creador_vid not in creadores_usados_en_feed:
+                                if (creador_vid is not None and
+                                        creador_vid not in creadores_usados_en_feed):
                                     video_id = vid
-                                    skills_usados.update(self.cache_skills_video.get(vid, set()))
+                                    skills_usados.update(
+                                        self.cache_skills_video.get(vid, set())
+                                    )
                                     creadores_usados_en_feed.add(creador_vid)
                                     creadores_por_ventana.append(creador_vid)
                                     break
@@ -905,7 +1233,8 @@ class RecommendationEngine:
 
                         if vid not in ids_usados:
                             creador_vid = self.video_a_creador.get(vid)
-                            if creador_vid is not None and creador_vid not in creadores_usados_en_feed:
+                            if (creador_vid is not None and
+                                    creador_vid not in creadores_usados_en_feed):
                                 skills_vid = self.cache_skills_video.get(vid, set())
                                 skills_nuevos = skills_vid - skills_usados
                                 if len(skills_nuevos) >= 1 or len(skills_usados) < 3:
@@ -922,16 +1251,21 @@ class RecommendationEngine:
 
                             if vid not in ids_usados:
                                 creador_vid = self.video_a_creador.get(vid)
-                                if creador_vid is not None and creador_vid not in creadores_usados_en_feed:
+                                if (creador_vid is not None and
+                                        creador_vid not in creadores_usados_en_feed):
                                     video_id = vid
-                                    skills_usados.update(self.cache_skills_video.get(vid, set()))
+                                    skills_usados.update(
+                                        self.cache_skills_video.get(vid, set())
+                                    )
                                     creadores_usados_en_feed.add(creador_vid)
                                     creadores_por_ventana.append(creador_vid)
                                     break
 
                 if video_id:
                     if es_flow:
-                        datos_flow = self.flows_df[self.flows_df['id'] == video_id].iloc[0]
+                        datos_flow = self.flows_df[
+                            self.flows_df['id'] == video_id
+                        ].iloc[0]
                         feed.append({
                             'position': len(feed) + 1,
                             'video_id': int(video_id),
@@ -948,7 +1282,9 @@ class RecommendationEngine:
                             'rating': 0.0
                         })
                     else:
-                        datos_video = self.videos_df[self.videos_df['id'] == video_id].iloc[0]
+                        datos_video = self.videos_df[
+                            self.videos_df['id'] == video_id
+                        ].iloc[0]
                         feed.append({
                             'position': len(feed) + 1,
                             'video_id': int(video_id),
@@ -971,36 +1307,59 @@ class RecommendationEngine:
         catalogo_total = len(self.videos_df)
         catalogo_disponible = catalogo_total - len(prefs_usuario['vistos'])
         if videos_excluidos:
-            catalogo_disponible = catalogo_disponible - len(videos_excluidos - prefs_usuario['vistos'])
+            catalogo_disponible = catalogo_disponible - len(
+                videos_excluidos_set - prefs_usuario['vistos']
+            )
 
-        todos_pools = set(pool_vmp) | set(pool_nu) | set(pool_au) | set(pool_flows) | set(pool_exploracion)
+        todos_pools = (
+            set(pool_vmp) | set(pool_nu) | set(pool_au) |
+            set(pool_flows) | set(pool_exploracion)
+        )
         cobertura_catalogo = len(todos_pools) / max(catalogo_disponible, 1) * 100
 
         cobertura_feed = len(ids_usados) / max(n_videos, 1) * 100
 
         conteo_contenido_nuevo = sum(1 for item in feed if item['days_old'] <= 45)
-        ratio_contenido_nuevo = conteo_contenido_nuevo / len(feed) * 100 if len(feed) > 0 else 0
+        ratio_contenido_nuevo = (
+            conteo_contenido_nuevo / len(feed) * 100 if len(feed) > 0 else 0
+        )
 
-        skills_diversos = set()
-        creadores_diversos = set()
+        skills_diversos: Set[str] = set()
+        creadores_diversos: Set[int] = set()
         for item in feed:
-            video_id = item['video_id']
-            if video_id in self.cache_skills_video:
-                skills_diversos.update(self.cache_skills_video[video_id])
+            video_id_item = item['video_id']
+            if video_id_item in self.cache_skills_video:
+                skills_diversos.update(self.cache_skills_video[video_id_item])
             if item['type'] != 'FW':
-                datos_video = self.videos_df[self.videos_df['id'] == video_id]
+                datos_video = self.videos_df[
+                    self.videos_df['id'] == video_id_item
+                ]
                 if len(datos_video) > 0:
                     creadores_diversos.add(datos_video.iloc[0]['user_id'])
 
         diversidad_skills = len(skills_diversos) / max(len(feed) * 2, 1) * 100
-        diversidad_creadores = len(creadores_usados_en_feed) / max(len(feed), 1) * 100
+        diversidad_creadores = (
+            len(creadores_usados_en_feed) / max(len(feed), 1) * 100
+        )
+
+        avg_views = (
+            float(np.mean([item['views'] for item in feed if item['type'] != 'FW']))
+            if any(item['type'] != 'FW' for item in feed)
+            else 0
+        )
+
+        avg_rating = (
+            float(np.mean([item['rating'] for item in feed if item['type'] != 'FW']))
+            if any(item['type'] != 'FW' for item in feed)
+            else 0
+        )
 
         metricas = {
             'total_videos': len(feed),
             'type_distribution': dict(conteos_tipo),
             'unique_creators': len(creadores_usados_en_feed),
-            'avg_views': float(np.mean([item['views'] for item in feed if item['type'] != 'FW'])) if any(item['type'] != 'FW' for item in feed) else 0,
-            'avg_rating': float(np.mean([item['rating'] for item in feed if item['type'] != 'FW'])) if any(item['type'] != 'FW' for item in feed) else 0,
+            'avg_views': avg_views,
+            'avg_rating': avg_rating,
             'execution_time': round(tiempo_exec, 3),
             'catalog_coverage': round(cobertura_catalogo, 2),
             'feed_coverage': round(cobertura_feed, 2),
@@ -1027,10 +1386,15 @@ class RecommendationEngine:
 
         return feed, metricas
 
-    def _obtener_flows_vistos_usuario(self, user_id):
+    def _obtener_flows_vistos_usuario(self, user_id: int) -> Set[int]:
         """
-        Consulta activity_log para obtener flows ya vistos por el usuario.
-        Retorna set de flow IDs que el usuario ya vio.
+        Consulta activity_log para obtener flows ya vistos por usuario.
+
+        Args:
+            user_id: ID del usuario
+
+        Returns:
+            Set de flow IDs que usuario ya vio
         """
         try:
             conn = MySQLConnection()
@@ -1045,7 +1409,11 @@ class RecommendationEngine:
             """
 
             result = conn.execute_query(query, (user_id,))
-            flows_vistos = set([int(row['subject_id']) for row in result if row['subject_id']])
+            flows_vistos = set([
+                int(row['subject_id'])
+                for row in result
+                if row['subject_id']
+            ])
 
             conn.close()
             logger.info(f"Usuario {user_id} ha visto {len(flows_vistos)} flows")
@@ -1055,11 +1423,22 @@ class RecommendationEngine:
             logger.error(f"Error obteniendo flows vistos usuario {user_id}: {e}")
             return set()
 
-    def _seleccionar_flows_para_usuario(self, user_id, n=24, excluded_ids=None):
+    def _seleccionar_flows_para_usuario(
+        self,
+        user_id: int,
+        n: int = 24,
+        excluded_ids: Optional[List[int]] = None
+    ) -> List[int]:
         """
-        Selecciona flows ordenados por relevancia para el usuario.
-        No repite flows hasta agotar todos los disponibles.
-        Excluye flows en excluded_ids para scroll infinito.
+        Selecciona flows ordenados por relevancia para usuario.
+
+        Args:
+            user_id: ID del usuario
+            n: Numero de flows a seleccionar
+            excluded_ids: Lista de IDs de flows a excluir
+
+        Returns:
+            Lista de flow IDs seleccionados
         """
         if excluded_ids is None:
             excluded_ids = []
@@ -1109,22 +1488,40 @@ class RecommendationEngine:
         logger.info(f"Seleccionados {len(flow_ids)} flows para usuario {user_id}")
         return flow_ids
 
-    def generar_feed_flows_only(self, user_id, n_flows=24, excluded_ids=None):
+    def generar_feed_flows_only(
+        self,
+        user_id: int,
+        n_flows: int = 24,
+        excluded_ids: Optional[List[int]] = None
+    ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
         Genera feed de SOLO flows para endpoint be_discover.
-        Siempre devuelve 24 flows ordenados por relevancia.
-        Excluye flows en excluded_ids para scroll infinito.
+
+        Args:
+            user_id: ID del usuario
+            n_flows: Numero de flows a generar
+            excluded_ids: Lista de IDs de flows a excluir
+
+        Returns:
+            Tupla con lista de flows y metricas de rendimiento
         """
         if excluded_ids is None:
             excluded_ids = []
 
         tiempo_inicio = time.time()
 
-        logger.info(f"Generando feed flows_only para usuario {user_id}, excluyendo {len(excluded_ids)} flows")
+        logger.info(
+            f"Generando feed flows_only para usuario {user_id}, "
+            f"excluyendo {len(excluded_ids)} flows"
+        )
 
-        flow_ids = self._seleccionar_flows_para_usuario(user_id, n=n_flows, excluded_ids=excluded_ids)
+        flow_ids = self._seleccionar_flows_para_usuario(
+            user_id,
+            n=n_flows,
+            excluded_ids=excluded_ids
+        )
 
-        feed = []
+        feed: List[Dict[str, Any]] = []
         for idx, flow_id in enumerate(flow_ids):
             flow_row = self.flows_df[self.flows_df['id'] == flow_id]
             if len(flow_row) == 0:
@@ -1146,6 +1543,8 @@ class RecommendationEngine:
             'execution_time': round(tiempo_exec, 3)
         }
 
-        logger.info(f"Feed flows_only generado: {len(feed)} flows en {tiempo_exec:.3f}s")
+        logger.info(
+            f"Feed flows_only generado: {len(feed)} flows en {tiempo_exec:.3f}s"
+        )
 
         return feed, metricas

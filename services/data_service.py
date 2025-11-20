@@ -1,7 +1,11 @@
-import pandas as pd
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
+
+import pandas as pd
+
 from utils.logger import LoggerConfig
+from utils.db_connect import get_db_connection
 
 logger = LoggerConfig.get_logger(__name__)
 
@@ -9,45 +13,72 @@ logger = LoggerConfig.get_logger(__name__)
 class DataService:
     """
     Servicio singleton para carga y gestion de datos desde MySQL.
-    Carga usuarios, videos, flows, interacciones y conexiones en DataFrames de Pandas.
+
+    Carga usuarios, videos, flows, interacciones y conexiones en DataFrames.
     Implementa blacklist de URLs a nivel SQL.
     """
-    _instancia = None
-    _inicializado = False
 
-    def __new__(cls, connection_factory=None):
+    _instancia: Optional['DataService'] = None
+    _inicializado: bool = False
+
+    def __new__(
+        cls,
+        connection_factory: Optional[Any] = None
+    ) -> 'DataService':
+        """
+        Crea nueva instancia usando patron singleton.
+
+        Args:
+            connection_factory: Factory para crear conexiones MySQL
+
+        Returns:
+            Instancia unica de DataService
+        """
         if cls._instancia is None:
             cls._instancia = super(DataService, cls).__new__(cls)
         return cls._instancia
 
-    def __init__(self, connection_factory=None):
+    def __init__(self, connection_factory: Optional[Any] = None) -> None:
+        """
+        Inicializa servicio de datos.
+
+        Args:
+            connection_factory: Factory para crear conexiones MySQL
+
+        Raises:
+            ValueError: Si connection_factory es None en primera inicializacion
+        """
         if DataService._inicializado:
             return
 
         if connection_factory is None:
-            raise ValueError("connection_factory requerido en primera inicializacion")
+            raise ValueError(
+                "connection_factory requerido en primera inicializacion"
+            )
 
         self.connection_factory = connection_factory
-        self.users_df = pd.DataFrame()
-        self.videos_df = pd.DataFrame()
-        self.interactions_df = pd.DataFrame()
-        self.connections_df = pd.DataFrame()
-        self.flows_df = pd.DataFrame()
-        self._conn = None
-        self.lista_negra = self._cargar_lista_negra()
+        self.users_df: pd.DataFrame = pd.DataFrame()
+        self.videos_df: pd.DataFrame = pd.DataFrame()
+        self.interactions_df: pd.DataFrame = pd.DataFrame()
+        self.connections_df: pd.DataFrame = pd.DataFrame()
+        self.flows_df: pd.DataFrame = pd.DataFrame()
+        self._conn: Optional[Any] = None
+        self._tunnel: Optional[Any] = None
+        self.lista_negra: Set[str] = self._cargar_lista_negra()
         DataService._inicializado = True
 
-    def _cargar_lista_negra(self):
+    def _cargar_lista_negra(self) -> Set[str]:
         """
         Carga lista de URLs bloqueadas desde data/blacklist.csv.
-        Retorna set de URLs a excluir en las queries SQL.
+
+        Returns:
+            Set de URLs a excluir en queries SQL
         """
         lista_negra_path = Path('data/blacklist.csv')
-
-        urls_bloqueadas = set()
+        urls_bloqueadas: Set[str] = set()
 
         if not lista_negra_path.exists():
-            logger.warning(f"No se encontro data/blacklist.csv")
+            logger.warning("No se encontro data/blacklist.csv")
             return urls_bloqueadas
 
         try:
@@ -58,20 +89,26 @@ class DataService:
                     if url and not url.startswith('#'):
                         urls_bloqueadas.add(url)
 
-            logger.info(f"Lista negra cargada: {len(urls_bloqueadas)} URLs bloqueadas")
+            logger.info(
+                f"Lista negra cargada: {len(urls_bloqueadas)} URLs bloqueadas"
+            )
         except Exception as e:
             logger.error(f"Error cargando lista negra: {e}")
 
         return urls_bloqueadas
 
-    def load_all_data(self):
+    def load_all_data(self) -> None:
         """
         Carga todos los datos desde MySQL a DataFrames en memoria.
-        Establece conexion y ejecuta carga de usuarios, videos, flows, interacciones y conexiones.
+
+        Establece conexion y ejecuta carga de usuarios, videos, flows,
+        interacciones y conexiones.
+
+        Raises:
+            Exception: Si falla la carga de datos
         """
         logger.info("Iniciando carga de datos")
-        self._conn = self.connection_factory()
-        self._conn.connect()
+        self._conn, self._tunnel = get_db_connection()
 
         try:
             self.users_df = self._load_users()
@@ -82,11 +119,29 @@ class DataService:
             logger.info("Carga de datos completada")
         except Exception as e:
             logger.error(f"Error cargando datos: {e}")
+            if self._conn:
+                self._conn.close()
+            if self._tunnel:
+                self._tunnel.stop_tunnel()
             raise
 
-    def _execute_query(self, query, params=None):
+    def _execute_query(
+        self,
+        query: str,
+        params: Optional[Any] = None
+    ) -> List[Dict[str, Any]]:
         """
         Ejecuta query SQL y retorna resultados.
+
+        Args:
+            query: Query SQL a ejecutar
+            params: Parametros opcionales para query
+
+        Returns:
+            Lista de diccionarios con resultados
+
+        Raises:
+            RuntimeError: Si no hay conexion establecida
         """
         if not self._conn or not self._conn.connection:
             raise RuntimeError("No hay conexion establecida")
@@ -94,10 +149,16 @@ class DataService:
         results = self._conn.execute_query(query, params)
         return results
 
-    def _normalize_city(self, city, country):
+    def _normalize_city(self, city: str, country: str) -> str:
         """
         Normaliza nombres de ciudades aplicando mapeo estandar.
-        Retorna ciudad normalizada o 'Unknown' si no hay datos validos.
+
+        Args:
+            city: Nombre de la ciudad
+            country: Nombre del pais
+
+        Returns:
+            Ciudad normalizada o 'Unknown' si no hay datos validos
         """
         if not city or city == '':
             if country and country != '':
@@ -126,11 +187,15 @@ class DataService:
 
         return city_mapping.get(city, city)
 
-    def _load_users(self):
+    def _load_users(self) -> pd.DataFrame:
         """
         Carga usuarios desde tabla users con datos de perfiles.
+
         Incluye skills, languages, tools, knowledge y objetivos.
-        Solo usuarios creados o actualizados desde 1 de septiembre de 2024.
+        Solo usuarios creados o actualizados en ultimos 90 dias.
+
+        Returns:
+            DataFrame con datos de usuarios
         """
         query = """
         SELECT
@@ -149,15 +214,21 @@ class DataService:
         FROM users u
         LEFT JOIN profiles p ON u.id = p.user_id
         WHERE u.deleted_at IS NULL
-        AND (u.created_at >= '2024-09-01' OR u.updated_at >= '2024-09-01')
+        AND (u.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+             OR u.updated_at >= DATE_SUB(NOW(), INTERVAL 90 DAY))
         """
+
         results = self._execute_query(query)
 
         if not results:
             logger.warning("No se encontraron usuarios en BD")
-            df_empty = pd.DataFrame(columns=['id', 'name', 'email', 'city', 'country', 'skills',
-                                            'knowledges', 'tools', 'languages', 'seniority',
-                                            'model_type', 'opencall_objective'])
+            df_empty = pd.DataFrame(
+                columns=[
+                    'id', 'name', 'email', 'city', 'country', 'skills',
+                    'knowledges', 'tools', 'languages', 'seniority',
+                    'model_type', 'opencall_objective'
+                ]
+            )
             df_empty['city'] = df_empty['city'].astype('category')
             df_empty['country'] = df_empty['country'].astype('category')
             return df_empty
@@ -170,13 +241,21 @@ class DataService:
         logger.info(f"Usuarios cargados: {len(df)}")
         return df
 
-    def _load_videos(self):
+    def _load_videos(self) -> pd.DataFrame:
         """
         Carga videos/resumes desde tabla resumes con metricas de engagement.
+
         Aplica blacklist a nivel SQL y calcula scores normalizados.
         Incluye ratings, connections, likes, exhibited y views.
+
+        Returns:
+            DataFrame con datos de videos
         """
-        lista_negra_sql = ','.join([f"'{url}'" for url in self.lista_negra]) if self.lista_negra else "''"
+        lista_negra_sql = (
+            ','.join([f"'{url}'" for url in self.lista_negra])
+            if self.lista_negra
+            else "''"
+        )
 
         query = f"""
         SELECT /*+ MAX_EXECUTION_TIME(60000) */
@@ -244,29 +323,27 @@ class DataService:
         AND r.video IS NOT NULL
         AND r.video NOT IN ({lista_negra_sql})
         AND u.deleted_at IS NULL
-        AND r.created_at >= '2024-10-01'
+        AND r.created_at >= DATE_SUB(NOW(), INTERVAL 360 DAY)
         AND LOWER(r.video) NOT LIKE '%prueba%'
         AND LOWER(r.video) NOT LIKE '%test%'
         AND LOWER(COALESCE(r.description, '')) NOT LIKE '%prueba%'
         AND LOWER(COALESCE(r.description, '')) NOT LIKE '%test%'
-        AND (
-            r.views >= 5
-            OR tf.avg_rating >= 3.0
-            OR matches.match_count >= 1
-            OR exhibited.exhibited_count >= 1
-        )
         """
         results = self._execute_query(query)
 
         if not results:
             logger.warning("No se encontraron videos/resumes en BD")
-            df_empty = pd.DataFrame(columns=['id', 'user_id', 'video', 'views', 'video_skills',
-                                            'video_knowledges', 'video_tools', 'video_languages',
-                                            'role_objectives', 'created_at', 'description',
-                                            'creator_city', 'creator_country', 'creator_name',
-                                            'avg_rating', 'rating_count', 'has_rating',
-                                            'connection_count', 'like_count', 'exhibited_count',
-                                            'actual_views', 'city', 'days_since_creation'])
+            df_empty = pd.DataFrame(
+                columns=[
+                    'id', 'user_id', 'video', 'views', 'video_skills',
+                    'video_knowledges', 'video_tools', 'video_languages',
+                    'role_objectives', 'created_at', 'description',
+                    'creator_city', 'creator_country', 'creator_name',
+                    'avg_rating', 'rating_count', 'has_rating',
+                    'connection_count', 'like_count', 'exhibited_count',
+                    'actual_views', 'city', 'days_since_creation'
+                ]
+            )
             df_empty['city'] = df_empty['city'].astype('category')
             df_empty['creator_name'] = df_empty['creator_name'].astype('category')
             return df_empty
@@ -283,31 +360,58 @@ class DataService:
         }
 
         for new_col, source_col in numeric_int_cols.items():
-            df[new_col] = pd.to_numeric(df[source_col], errors='coerce').fillna(0).astype(int)
+            df[new_col] = (
+                pd.to_numeric(df[source_col], errors='coerce')
+                .fillna(0)
+                .astype(int)
+            )
 
-        df['avg_rating'] = pd.to_numeric(df['avg_rating'], errors='coerce').fillna(0).astype(float)
+        df['avg_rating'] = (
+            pd.to_numeric(df['avg_rating'], errors='coerce')
+            .fillna(0)
+            .astype(float)
+        )
 
-        df['city'] = df.apply(lambda row: self._normalize_city(row['creator_city'], row['creator_country']), axis=1)
+        df['city'] = df.apply(
+            lambda row: self._normalize_city(
+                row['creator_city'],
+                row['creator_country']
+            ),
+            axis=1
+        )
 
         df['created_at'] = pd.to_datetime(df['created_at'])
-        df['days_since_creation'] = (datetime.now() - df['created_at']).dt.days
+        df['days_since_creation'] = (
+            datetime.now() - df['created_at']
+        ).dt.days
 
         df['city'] = df['city'].astype('category')
         df['creator_name'] = df['creator_name'].astype('category')
 
         logger.info(f"Videos cargados: {len(df)}")
-        logger.info(f"Videos con ciudad valida: {len(df[df['city'] != 'Unknown'])}")
+        logger.info(
+            f"Videos con ciudad valida: "
+            f"{len(df[df['city'] != 'Unknown'])}"
+        )
         logger.info(f"Ciudades unicas: {df['city'].nunique()}")
 
         return df
 
-    def _load_flows(self):
+    def _load_flows(self) -> pd.DataFrame:
         """
         Carga challenges/flows desde tabla challenges.
-        Filtra por status published, aplica blacklist y elimina duplicados por video URL.
-        Solo incluye flows creados/actualizados desde 2025-01-01.
+
+        Filtra por status published, aplica blacklist y elimina duplicados.
+        Solo incluye flows creados/actualizados en ultimos 90 dias.
+
+        Returns:
+            DataFrame con datos de flows
         """
-        lista_negra_sql = ','.join([f"'{url}'" for url in self.lista_negra]) if self.lista_negra else "''"
+        lista_negra_sql = (
+            ','.join([f"'{url}'" for url in self.lista_negra])
+            if self.lista_negra
+            else "''"
+        )
 
         query = f"""
         SELECT
@@ -328,13 +432,15 @@ class DataService:
                 c2.name,
                 c2.description,
                 c2.created_at,
-                ROW_NUMBER() OVER (PARTITION BY c2.video ORDER BY c2.created_at DESC) as rn
+                ROW_NUMBER() OVER (
+                    PARTITION BY c2.video ORDER BY c2.created_at DESC
+                ) as rn
             FROM challenges c2
             WHERE c2.deleted_at IS NULL
             AND c2.status = 'published'
             AND c2.video IS NOT NULL
             AND c2.video NOT IN ({lista_negra_sql})
-            AND (c2.created_at >= '2025-01-01' OR c2.updated_at >= '2025-01-01')
+            AND (c2.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY) OR c2.updated_at >= DATE_SUB(NOW(), INTERVAL 90 DAY))
             AND c2.name <> 'prueba'
             AND c2.description <> 'prueba'
             AND c2.name <> 'test'
@@ -348,9 +454,13 @@ class DataService:
 
         if not results:
             logger.warning("No se encontraron FLOWS en BD")
-            df_empty = pd.DataFrame(columns=['id', 'user_id', 'video', 'name', 'description',
-                                            'created_at', 'creator_name', 'creator_city',
-                                            'creator_country', 'city', 'days_since_creation'])
+            df_empty = pd.DataFrame(
+                columns=[
+                    'id', 'user_id', 'video', 'name', 'description',
+                    'created_at', 'creator_name', 'creator_city',
+                    'creator_country', 'city', 'days_since_creation'
+                ]
+            )
             df_empty['city'] = df_empty['city'].astype('category')
             df_empty['creator_name'] = df_empty['creator_name'].astype('category')
             return df_empty
@@ -365,9 +475,17 @@ class DataService:
         if antes != despues:
             logger.info(f"Duplicados eliminados: {antes - despues}")
 
-        df['city'] = df.apply(lambda row: self._normalize_city(row['creator_city'], row['creator_country']), axis=1)
+        df['city'] = df.apply(
+            lambda row: self._normalize_city(
+                row['creator_city'],
+                row['creator_country']
+            ),
+            axis=1
+        )
         df['created_at'] = pd.to_datetime(df['created_at'])
-        df['days_since_creation'] = (datetime.now() - df['created_at']).dt.days
+        df['days_since_creation'] = (
+            datetime.now() - df['created_at']
+        ).dt.days
 
         df['city'] = df['city'].astype('category')
         df['creator_name'] = df['creator_name'].astype('category')
@@ -376,12 +494,17 @@ class DataService:
 
         return df
 
-    def _load_interactions(self):
+    def _load_interactions(self) -> pd.DataFrame:
         """
         Carga interacciones de usuarios con videos.
-        Combina ratings, saves y matches en una matriz unificada.
-        Solo interacciones desde 1 de septiembre de 2024.
+
+        Combina ratings, saves, matches y vistas en matriz unificada.
+        Ratings/saves/matches: ultimos 90 dias.
+        Vistas (activity_log): ultimos 30 dias.
         Si no hay interacciones, crea matriz implicita desde views.
+
+        Returns:
+            DataFrame con interacciones
         """
         query = """
         SELECT
@@ -394,7 +517,7 @@ class DataService:
         WHERE type = 'ranking_resume'
         AND value > 0
         AND user_id IS NOT NULL
-        AND created_at >= '2024-09-01'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
         UNION ALL
         SELECT
             user_id,
@@ -405,7 +528,7 @@ class DataService:
         FROM likes
         WHERE type = 'save'
         AND user_id IS NOT NULL
-        AND created_at >= '2024-09-01'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
         UNION ALL
         SELECT
             user_id,
@@ -416,13 +539,28 @@ class DataService:
         FROM matches
         WHERE status = 'accepted'
         AND user_id IS NOT NULL
-        AND created_at >= '2024-09-01'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
+        UNION ALL
+        SELECT
+            causer_id as user_id,
+            subject_id as video_id,
+            2.0 as rating,
+            created_at,
+            'view' as interaction_type
+        FROM activity_log
+        WHERE description LIKE '%video%view%'
+        AND causer_id IS NOT NULL
+        AND subject_id IS NOT NULL
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         """
         results = self._execute_query(query)
         df = pd.DataFrame(results)
 
         if len(df) == 0:
-            logger.warning("No hay interacciones directas, creando matriz implicita desde views de resumes")
+            logger.warning(
+                "No hay interacciones directas, "
+                "creando matriz implicita desde views"
+            )
 
             query_implicit = """
             SELECT
@@ -434,6 +572,7 @@ class DataService:
             WHERE r.status = 'send'
             AND r.views > 0
             AND r.deleted_at IS NULL
+            AND r.created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
             LIMIT 5000
             """
             implicit_results = self._execute_query(query_implicit)
@@ -456,15 +595,24 @@ class DataService:
         logger.info(f"Interacciones cargadas: {len(df)}")
 
         if len(df) == 0:
-            df = pd.DataFrame(columns=['user_id', 'video_id', 'rating', 'created_at', 'interaction_type'])
+            df = pd.DataFrame(
+                columns=[
+                    'user_id', 'video_id', 'rating',
+                    'created_at', 'interaction_type'
+                ]
+            )
 
         return df
 
-    def _load_connections(self):
+    def _load_connections(self) -> pd.DataFrame:
         """
         Carga conexiones sociales entre usuarios.
-        Solo incluye conexiones con status accepted para el grafo social.
-        Solo conexiones desde 1 de septiembre de 2024.
+
+        Solo incluye conexiones con status accepted.
+        Solo conexiones de ultimos 90 dias.
+
+        Returns:
+            DataFrame con conexiones
         """
         query = """
         SELECT
@@ -474,17 +622,22 @@ class DataService:
             created_at
         FROM user_connections
         WHERE status = 'accepted'
-        AND created_at >= '2024-09-01'
+        AND created_at >= DATE_SUB(NOW(), INTERVAL 90 DAY)
         """
         results = self._execute_query(query)
         df = pd.DataFrame(results)
         logger.info(f"Conexiones sociales cargadas: {len(df)}")
         return df
 
-    def get_user_history(self, user_id):
+    def get_user_history(self, user_id: int) -> Set[int]:
         """
-        Obtiene historial de videos vistos por un usuario.
-        Retorna set de IDs de videos con los que el usuario ha interactuado.
+        Obtiene historial de videos vistos por usuario.
+
+        Args:
+            user_id: ID del usuario
+
+        Returns:
+            Set de IDs de videos con los que usuario ha interactuado
         """
         if self.interactions_df is None or len(self.interactions_df) == 0:
             return set()
@@ -497,10 +650,15 @@ class DataService:
         ]
         return set(user_interactions['video_id'].tolist())
 
-    def get_user_network(self, user_id):
+    def get_user_network(self, user_id: int) -> List[int]:
         """
-        Obtiene red social de un usuario.
-        Retorna lista de IDs de usuarios conectados con status accepted.
+        Obtiene red social de usuario.
+
+        Args:
+            user_id: ID del usuario
+
+        Returns:
+            Lista de IDs de usuarios conectados con status accepted
         """
         if self.connections_df is None or len(self.connections_df) == 0:
             return []

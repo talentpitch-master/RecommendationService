@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict
 
 class LoggerConfig:
     """
@@ -8,15 +9,20 @@ class LoggerConfig:
     Implementa patron singleton para loggers con timezone GMT-5.
     Configura formato, archivo de log y niveles para diferentes modulos.
     """
-    _loggers = {}
-    _initialized = False
+    _loggers: Dict[str, logging.Logger] = {}
+    _initialized: bool = False
 
     @staticmethod
-    def setup_logging(log_dir='logs', version_name=None):
+    def setup_logging(log_dir: str = 'logs', version_name: Optional[str] = None) -> None:
         """
         Configura el sistema de logging global con formato GMT-5.
-        Crea directorio de logs, configura handler de archivo y formatter personalizado.
-        Solo se ejecuta una vez gracias al flag _initialized.
+
+        Args:
+            log_dir: Directorio donde se guardaran los archivos de log
+            version_name: Version opcional (no usado actualmente)
+
+        Note:
+            Solo se ejecuta una vez gracias al flag _initialized
         """
         if LoggerConfig._initialized:
             return
@@ -30,18 +36,29 @@ class LoggerConfig:
             Formatter personalizado con timezone GMT-5 (Colombia/Bogota).
             Convierte timestamps UTC a GMT-5 para logs localizados.
             """
-            def converter(self, timestamp):
+            def converter(self, timestamp: float) -> datetime:
                 """
                 Convierte timestamp Unix a datetime en GMT-5.
-                Retorna datetime object en timezone GMT-5.
+
+                Args:
+                    timestamp: Timestamp Unix en segundos
+
+                Returns:
+                    Objeto datetime en timezone GMT-5
                 """
                 dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
                 return dt.astimezone(timezone(timedelta(hours=-5)))
 
-            def formatTime(self, record, datefmt=None):
+            def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
                 """
                 Formatea timestamp del log record usando GMT-5.
-                Retorna string con fecha/hora formateada.
+
+                Args:
+                    record: Log record con timestamp a formatear
+                    datefmt: Formato de fecha opcional (strftime)
+
+                Returns:
+                    String con fecha/hora formateada
                 """
                 dt = self.converter(record.created)
                 if datefmt:
@@ -65,11 +82,16 @@ class LoggerConfig:
         LoggerConfig._initialized = True
 
     @staticmethod
-    def get_logger(name, version_name=None):
+    def get_logger(name: str, version_name: Optional[str] = None) -> logging.Logger:
         """
         Obtiene o crea un logger por nombre.
-        Inicializa el sistema de logging si es necesario.
-        Retorna instancia de logger para el modulo especificado.
+
+        Args:
+            name: Nombre del logger (usualmente __name__ del modulo)
+            version_name: Version opcional (no usado actualmente)
+
+        Returns:
+            Instancia de logger para el modulo especificado
         """
         if not LoggerConfig._initialized:
             LoggerConfig.setup_logging()

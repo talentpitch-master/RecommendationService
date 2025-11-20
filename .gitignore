@@ -4,3 +4,9 @@
 venv/
 env
 .env
+/.claude
+/.venv
+/.vscode
+/.test
+/garbage
+*.backup

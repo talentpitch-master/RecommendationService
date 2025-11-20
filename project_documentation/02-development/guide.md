@@ -1,6 +1,6 @@
 # Guía de Desarrollo - TalentPitch Recommendation Service
 
-## 🚀 Inicio Rápido
+##  Inicio Rápido
 
 ### Prerrequisitos
 
@@ -54,7 +54,7 @@ curl -X POST http://localhost:5002/api/search/total \
 
 ---
 
-## 🛠️ Desarrollo Local
+##  Desarrollo Local
 
 ### Sin Docker
 
@@ -87,7 +87,7 @@ Si modificas código en `api/`, `core/`, `services/` o `utils/`:
 
 ---
 
-## 📝 Convenciones de Desarrollo
+##  Convenciones de Desarrollo
 
 ### Estructura de Archivos
 
@@ -175,19 +175,19 @@ def funcion_ejemplo(parametro1, parametro2):
 ### Comentarios
 
 ```python
-# ✅ Correcto
+#  Correcto
 # Calcular score de popularidad combinando views, ratings y connections
 score = views_norm * 0.4 + rating_norm * 0.3 + connections_norm * 0.3
 
-# ❌ Incorrecto
+#  Incorrecto
 # calcula score
 score = views_norm * 0.4 + rating_norm * 0.3 + connections_norm * 0.3
 
-# ✅ Correcto - Inline comment para aclarar
+#  Correcto - Inline comment para aclarar
 if len(candidatos) == 0:  # Si no hay candidatos, usar pool de exploracion
     pool = self._seleccionar_boost_exploracion(ids_excluir)
 
-# ❌ Incorrecto - Comentario obvio
+#  Incorrecto - Comentario obvio
 # si candidatos es 0
 if len(candidatos) == 0:
 ```
@@ -200,7 +200,7 @@ if len(candidatos) == 0:
 3. Local modules
 
 ```python
-# ✅ Correcto
+#  Correcto
 import os
 import sys
 import time
@@ -242,7 +242,7 @@ logger.debug(f"Pools generados: VMP={len(vmp_pool)}, AU={len(au_pool)}")
 
 ---
 
-## 🧪 Testing
+##  Testing
 
 ### Test Manual de Endpoints
 
@@ -309,7 +309,7 @@ print(f"Status: {response.status_code}")
 
 ---
 
-## 🔧 Debugging
+##  Debugging
 
 ### Ver Logs
 
@@ -369,7 +369,7 @@ profiler.print_stats(sort='cumulative')
 
 ---
 
-## 🐛 Common Issues
+##  Common Issues
 
 ### Error: "No se encontró .env"
 
@@ -489,7 +489,7 @@ test/nombre-test
 
 ---
 
-## 🚀 Deployment
+##  Deployment
 
 ### Build Production
 
@@ -534,7 +534,7 @@ kubectl rollout undo deployment/search-api
 
 ---
 
-## 📊 Monitoring
+##  Monitoring
 
 ### Health Check
 
