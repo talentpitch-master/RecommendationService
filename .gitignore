@@ -1,9 +1,12 @@
 **/__pycache__
-/credentials/.env
-/credentials/*.pem
+/credentials
 /logs
-cleanup.py
-.claude
 venv/
 env
 .env
+/.claude
+/.venv
+/.vscode
+/.test
+/garbage
+*.backup

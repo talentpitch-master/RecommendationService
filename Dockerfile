@@ -3,10 +3,13 @@ FROM --platform=linux/amd64 python:3.13-alpine3.22
 RUN apk add --no-cache \
     gcc \
     g++ \
+    gfortran \
     musl-dev \
     linux-headers \
     libffi-dev \
     openssl-dev \
+    openblas-dev \
+    lapack-dev \
     git && \
     apk upgrade --no-cache busybox busybox-binsh --repository=http://dl-cdn.alpinelinux.org/alpine/edge/main || true
 
@@ -27,4 +30,4 @@ ENV PYTHONUNBUFFERED=1
 
 EXPOSE 5002
 
-CMD ["gunicorn", "api.server:app", "--bind", "0.0.0.0:5002", "--workers", "4", "--worker-class", "uvicorn.workers.UvicornWorker", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-"]
+CMD ["gunicorn", "api.server:app", "--bind", "0.0.0.0:5002", "--workers", "2", "--preload", "--worker-class", "uvicorn.workers.UvicornWorker", "--timeout", "60", "--access-logfile", "-", "--error-logfile", "-"]
