@@ -13,6 +13,7 @@ IMPORTANTE:
     - NO inventar metodos nuevos de conexion
     - Este es el UNICO metodo correcto
 """
+import os
 
 from core.ssh_tunnel import SSHTunnelManager
 from core.database import MySQLConnection
@@ -33,15 +34,31 @@ def get_db_connection(use_pooling: bool = False):
             results = conn.execute_query("SELECT COUNT(*) FROM users")
             print(results)
     """
+    # Guardar credenciales originales
+    original_host = os.getenv('MYSQL_HOST')
+    original_port = os.getenv('MYSQL_PORT', '3306')
+
     # Iniciar tunel SSH
     tunnel = SSHTunnelManager()
-    tunnel.start_tunnel()
+    tunnel.start_tunnel(local_port=3307)
 
-    # Conectar a BD
-    conn = MySQLConnection()
-    conn.connect(use_pooling=use_pooling)
+    # Sobrescribir host y puerto para usar el tunel local
+    os.environ['MYSQL_HOST'] = '127.0.0.1'
+    os.environ['MYSQL_PORT'] = '3307'
 
-    return conn, tunnel
+    try:
+        # Conectar a BD a traves del tunel
+        conn = MySQLConnection()
+        conn.connect(use_pooling=use_pooling)
+
+        return conn, tunnel
+
+    finally:
+        # Restaurar credenciales originales
+        if original_host:
+            os.environ['MYSQL_HOST'] = original_host
+        if original_port:
+            os.environ['MYSQL_PORT'] = original_port
 
 
 if __name__ == '__main__':

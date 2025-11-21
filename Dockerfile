@@ -3,10 +3,13 @@ FROM --platform=linux/amd64 python:3.13-alpine3.22
 RUN apk add --no-cache \
     gcc \
     g++ \
+    gfortran \
     musl-dev \
     linux-headers \
     libffi-dev \
     openssl-dev \
+    openblas-dev \
+    lapack-dev \
     git && \
     apk upgrade --no-cache busybox busybox-binsh --repository=http://dl-cdn.alpinelinux.org/alpine/edge/main || true
 

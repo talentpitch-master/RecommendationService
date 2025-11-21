@@ -1,8 +1,9 @@
 gunicorn==23.0.0
 uvicorn==0.38.0
-fastapi==0.119.1
-redis==7.0.0
-python-dotenv==1.1.1
+fastapi==0.121.3
+redis==7.1.0
+python-dotenv==1.2.1
 pymysql==1.1.2
 pandas==2.3.3
-scipy==1.11.4
+scipy==1.15.3
+paramiko==4.0.0
